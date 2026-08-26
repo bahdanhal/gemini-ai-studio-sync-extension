@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+    <!-- Chrome recommends a 96 px mark inside a 128 px canvas. -->
+    <rect x="64" y="64" width="384" height="384" rx="96" fill="#312E81" />
+
+    <!-- Filled sync shapes avoid fragile stroke rendering at small sizes. -->
+    <path
+        d="M146 232C160 165 216 124 285 132C331 136 371 160 396 198L355 224C339 198 312 181 280 178C236 175 199 202 190 243Z"
+        fill="#22D3EE"
+    />
+    <path d="M348 171L404 202L348 233Z" fill="#22D3EE" />
+
+    <path
+        d="M366 280C352 347 296 388 227 380C181 376 141 352 116 314L157 288C173 314 200 331 232 334C276 337 313 310 322 269Z"
+        fill="#C084FC"
+    />
+    <path d="M164 341L108 310L164 279Z" fill="#C084FC" />
+
+    <!-- A single large AI sparkle replaces the previous small orbital detail. -->
+    <path
+        d="M256 194C264 229 283 248 318 256C283 264 264 283 256 318C248 283 229 264 194 256C229 248 248 229 256 194Z"
+        fill="#FFFFFF"
+    />
+</svg>

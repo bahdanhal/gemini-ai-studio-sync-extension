@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 560" width="1400" height="560">
+    <rect width="1400" height="560" fill="#0B1026" />
+    <circle cx="1300" cy="40" r="310" fill="#312E81" opacity="0.52" />
+    <circle cx="1260" cy="600" r="260" fill="#581C87" opacity="0.32" />
+    <circle cx="60" cy="530" r="220" fill="#164E63" opacity="0.25" />
+
+    <g opacity="0.18" fill="none" stroke="#A5B4FC" stroke-width="3">
+        <rect x="1080" y="134" width="198" height="48" rx="12" />
+        <rect x="1120" y="205" width="218" height="48" rx="12" />
+        <rect x="1060" y="276" width="248" height="48" rx="12" />
+        <path d="M1040 158H1010V300H1040" />
+    </g>
+
+    <g transform="translate(56 24)">
+        <rect x="64" y="64" width="384" height="384" rx="96" fill="#312E81" />
+        <path d="M146 232C160 165 216 124 285 132C331 136 371 160 396 198L355 224C339 198 312 181 280 178C236 175 199 202 190 243Z" fill="#22D3EE" />
+        <path d="M348 171L404 202L348 233Z" fill="#22D3EE" />
+        <path d="M366 280C352 347 296 388 227 380C181 376 141 352 116 314L157 288C173 314 200 331 232 334C276 337 313 310 322 269Z" fill="#C084FC" />
+        <path d="M164 341L108 310L164 279Z" fill="#C084FC" />
+        <path d="M256 194C264 229 283 248 318 256C283 264 264 283 256 318C248 283 229 264 194 256C229 248 248 229 256 194Z" fill="#FFFFFF" />
+    </g>
+
+    <text x="590" y="244" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="72" font-weight="700">AI Studio Local Sync</text>
+    <text x="594" y="310" fill="#A5B4FC" font-family="Inter, Arial, sans-serif" font-size="33" font-weight="500">Context in. Changes out.</text>
+    <rect x="594" y="356" width="378" height="54" rx="27" fill="#312E81" />
+    <text x="783" y="392" fill="#E0E7FF" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="600" text-anchor="middle">LOCAL-FIRST  •  OPEN SOURCE</text>
+</svg>
