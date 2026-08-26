@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Studio Local File Sync & Codebase Context",
-  "version": "3.2.1",
+  "version": "1.0.0",
   "description": "Sync files/diffs to local disk, and pack repository context into AI Studio.",
   "homepage_url": "https://github.com/bahdanhal/gemini-ai-studio-sync-extension",
   "icons": {

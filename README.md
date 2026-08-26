@@ -15,7 +15,7 @@ Write files, apply AI-generated diffs, preview visual line-by-line changes, roll
 
 ### 💾 1. Two-Way Workspace Synchronization
 * **Direct File Writing:** Save single code blocks (`💾 Sync`) or sync all files in a chat turn (`⚡ Sync to Disk`) directly to your local file system.
-* **Diff Workflow:** Detects search/replace blocks (`<<<<<<< SEARCH ... >>>>>>> REPLACE`) and unified diffs (`@@ -x,y +x,y @@`), merging them into your existing files on disk.
+* **Reliable Diff Workflow:** Uses canonical multi-file git diffs as the primary sync format. File paths come from `diff --git` / `---` / `+++` headers instead of fragile nearby Markdown headings. Safe symmetric LLM hunk-count mistakes are repaired only after exact source matching; fenced, unfenced, SEARCH/REPLACE, and clearly introduced complete-file responses remain supported.
 * **Persistent Connection:** Uses browser IndexedDB to remember your connected project directory across refreshes.
 
 ### 🔍 2. Visual Diff Viewer & In-Modal Code Editor
@@ -32,6 +32,7 @@ Write files, apply AI-generated diffs, preview visual line-by-line changes, roll
 ### 🛡️ 4. Safety & Developer Quality-of-Life
 * **Dual-Mode Parsing Engine:** Parses files across normal AI Studio components and high-volume raw `.very-large-text-container` rendering modes.
 * **Smart Up-to-Date Detection:** Files matching disk content (`SAME`) are skipped to avoid unnecessary writes.
+* **Fail-Closed Patch Validation:** Unified-diff hunk counts and source context must match before a patch can be applied; significant whitespace—including blank context lines—is preserved exactly, and malformed output remains safely unselected instead of being partially written.
 * **One-Click Undo:** Revert written files back to their exact previous state with the floating toolbar's **↩️ Undo** button.
 * **Keyboard Navigation:** Press <kbd>Esc</kbd> or click the backdrop to instantly cancel/close review dialogs.
 
@@ -68,6 +69,7 @@ Write files, apply AI-generated diffs, preview visual line-by-line changes, roll
 4. Click **📥 Insert Context into Prompt**. The extension inserts the packed context through a paste event; AI Studio may convert sufficiently large content into an attachment card.
 
 ### 3. Sync AI Responses Back to Disk
+* **Preferred response format:** Click **📎 Context ▾ → 📋 Insert Diff Format Instructions** before asking the model to edit code. The model is instructed to return one canonical git diff in a six-backtick outer fence (so Markdown files can safely contain ordinary code fences), including `/dev/null` headers for new files.
 * **Single File:** Click the **`💾 Sync`** button on any code block header.
 * **Turn Sync:** Click the **`⚡ Sync to Disk`** button in the chat turn action bar to review and batch-sync all generated files.
 * **Review Modal:** Inspect visual diffs, toggle which files to apply, make code tweaks in the editor tab, and click **💾 Sync Selected File(s)**.

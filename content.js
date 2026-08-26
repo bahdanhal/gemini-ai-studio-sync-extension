@@ -85,17 +85,25 @@ function showToast(message, type = 'info', duration = 3500) {
     }, duration);
 }
 
-const STRICT_SYNC_FORMAT_PROMPT = `Please output code changes using one of these formats only:
+const STRICT_SYNC_FORMAT_PROMPT = `Return code changes as one canonical git unified diff in a single SIX-backtick Markdown fence.
 
-1. Complete files: <file path="relative/path/to/file.ext"> followed by the full, ready-to-save file content and </file>.
-2. Targeted patches: SEARCH/REPLACE blocks with enough context to be unique:
-${'<<<<<<<'} SEARCH
-exact existing lines
-${'======='}
-replacement lines
-${'>>>>>>> REPLACE'}
+Rules:
+- Use repository-relative paths in every \`diff --git a/path b/path\`, \`---\`, and \`+++\` header.
+- Include enough unchanged context for every hunk to match the current file exactly.
+- For a new file, use \`--- /dev/null\` and \`+++ b/relative/path\`.
+- The outer fence must open with exactly six backticks plus \`diff\`, and close with exactly six backticks. This prevents backticks inside Markdown files from breaking the diff block.
+- Do not put prose, excerpts, placeholders, or unchanged complete files inside the diff fence.
+- Never escape or reformat file contents to make them look nicer in Markdown.
 
-Do not provide partial excerpts, snippets, placeholders, or truncated code outside SEARCH/REPLACE blocks.`;
+Example:
+\`\`\`\`\`\`diff
+diff --git a/src/example.js b/src/example.js
+--- a/src/example.js
++++ b/src/example.js
+@@ -1,1 +1,1 @@
+-const oldValue = true;
++const newValue = true;
+\`\`\`\`\`\``;
 
 async function insertStrictSyncFormatPrompt() {
     await insertIntoPrompt(STRICT_SYNC_FORMAT_PROMPT);
@@ -228,6 +236,7 @@ function isSearchReplaceDiff(text) {
 
 function isUnifiedDiff(text) {
     return (
+        /^diff --git\s+/m.test(text) ||
         /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/m.test(text) ||
         (/^--- (?:a\/|\/dev\/null|[^\r\n]+)/m.test(text) && /^\+\+\+ (?:b\/|[^\r\n]+)/m.test(text))
     );
@@ -288,8 +297,11 @@ function applySearchReplace(original, patch) {
 }
 
 function applyUnifiedPatch(original, patch) {
-    const lines = patch.split(/\r?\n/);
-    const origLines = original.split(/\r?\n/);
+    const lines = stripOuterMarkdownFence(patch).split(/\r?\n/);
+    const normalizedOriginal = original.replace(/\r\n/g, '\n');
+    const originalHadFinalNewline = normalizedOriginal.endsWith('\n');
+    const origLines = normalizedOriginal === '' ? [] : normalizedOriginal.split('\n');
+    if (originalHadFinalNewline) origLines.pop();
     const hunks = [];
     let currentHunk = null;
 
@@ -299,12 +311,15 @@ function applyUnifiedPatch(original, patch) {
 
         if (hunkMatch) {
             if (currentHunk) hunks.push(currentHunk);
-            currentHunk = { oldStart: parseInt(hunkMatch[1], 10), lines: [] };
+            currentHunk = {
+                oldStart: parseInt(hunkMatch[1], 10),
+                oldCount: hunkMatch[2] === undefined ? 1 : parseInt(hunkMatch[2], 10),
+                newCount: hunkMatch[4] === undefined ? 1 : parseInt(hunkMatch[4], 10),
+                lines: []
+            };
         } else if (currentHunk) {
-            if (/^(?:---|\+\+\+|diff --git)/.test(line)) continue;
-            currentHunk.lines.push(line);
-        } else if (/^[+\- ]/.test(line)) {
-            if (!currentHunk) currentHunk = { oldStart: 1, lines: [] };
+            if (line === '\\ No newline at end of file') continue;
+            if (!/^[+\- ]/.test(line)) continue;
             currentHunk.lines.push(line);
         }
     }
@@ -320,38 +335,59 @@ function applyUnifiedPatch(original, patch) {
         const hunk = hunks[h];
         const oldLines = [];
         const newLines = [];
+        let contextLineCount = 0;
 
         for (const line of hunk.lines) {
             const marker = line[0];
             const content = line.slice(1);
             if (marker === '-') oldLines.push(content);
             else if (marker === '+') newLines.push(content);
-            else if (marker === ' ') { oldLines.push(content); newLines.push(content); }
+            else if (marker === ' ') {
+                oldLines.push(content);
+                newLines.push(content);
+                contextLineCount++;
+            }
         }
 
-        let startIdx = Math.max(0, hunk.oldStart ? hunk.oldStart - 1 : 0);
-        let foundIdx = -1;
-        const searchRadius = Math.max(resultLines.length, 50);
+        const oldCountDrift = oldLines.length - hunk.oldCount;
+        const newCountDrift = newLines.length - hunk.newCount;
+        const countsMatch = oldCountDrift === 0 && newCountDrift === 0;
+        const safelyRepairableCounts = contextLineCount > 0 && oldCountDrift === newCountDrift;
 
-        for (let offset = 0; offset < searchRadius; offset++) {
-            const tryIndices = [startIdx + offset, startIdx - offset].filter(
-                idx => idx >= 0 && idx + oldLines.length <= resultLines.length
+        // Hunk counts are metadata; the old-side body matching the real file is
+        // authoritative. Gemini commonly miscounts by one when it includes or
+        // omits a context line. Only tolerate symmetric drift, which preserves
+        // the declared old/new line delta. Asymmetric drift remains malformed.
+        if (!countsMatch && !safelyRepairableCounts) {
+            throw new Error(
+                `Malformed unified diff hunk near line ${hunk.oldStart}: ` +
+                `header expects ${hunk.oldCount}/${hunk.newCount} old/new lines, ` +
+                `but the body contains ${oldLines.length}/${newLines.length}.`
             );
+        }
 
-            for (const idx of tryIndices) {
-                let matches = true;
-                for (let j = 0; j < oldLines.length; j++) {
-                    if (resultLines[idx + j].trimEnd() !== oldLines[j].trimEnd()) {
-                        matches = false;
-                        break;
-                    }
-                }
-                if (matches) {
-                    foundIdx = idx;
-                    break;
-                }
+        const expectedIdx = Math.max(0, hunk.oldStart ? hunk.oldStart - 1 : 0);
+        const matchesAt = (idx) => {
+            if (idx < 0 || idx + oldLines.length > resultLines.length) return false;
+            for (let j = 0; j < oldLines.length; j++) {
+                if (resultLines[idx + j].trimEnd() !== oldLines[j].trimEnd()) return false;
             }
-            if (foundIdx !== -1) break;
+            return true;
+        };
+
+        let foundIdx = matchesAt(expectedIdx) ? expectedIdx : -1;
+        if (foundIdx === -1) {
+            const candidates = [];
+            for (let idx = 0; idx <= resultLines.length - oldLines.length; idx++) {
+                if (matchesAt(idx)) candidates.push(idx);
+            }
+            if (candidates.length > 1) {
+                throw new Error(
+                    `Unified diff hunk near line ${hunk.oldStart} is ambiguous ` +
+                    `(${candidates.length} matching locations). Request more unchanged context.`
+                );
+            }
+            if (candidates.length === 1) foundIdx = candidates[0];
         }
 
         if (foundIdx !== -1) {
@@ -361,20 +397,24 @@ function applyUnifiedPatch(original, patch) {
         }
     }
 
-    return resultLines.join('\n');
+    const shouldHaveFinalNewline = normalizedOriginal === '' || originalHadFinalNewline;
+    return resultLines.join('\n') + (shouldHaveFinalNewline && resultLines.length > 0 ? '\n' : '');
 }
 
 function processDiffOrDirectContent(originalContent, newContent) {
     if (!isDiffContent(newContent)) {
         return { isDiff: false, content: newContent };
     }
-    if (originalContent === null) {
+    if (isUnifiedDiff(newContent) && /^\+\+\+ \/dev\/null\s*$/m.test(newContent)) {
+        throw new Error('File deletion diffs are not supported. Delete the file manually.');
+    }
+    if (originalContent === null && !(isUnifiedDiff(newContent) && /^--- \/dev\/null\s*$/m.test(newContent))) {
         throw new Error('Diff received, but target file does not exist locally.');
     }
     if (isSearchReplaceDiff(newContent)) {
         return { isDiff: true, content: applySearchReplace(originalContent, newContent) };
     }
-    return { isDiff: true, content: applyUnifiedPatch(originalContent, newContent) };
+    return { isDiff: true, content: applyUnifiedPatch(originalContent || '', newContent) };
 }
 
 function computeLineDiff(oldText, newText) {
@@ -600,7 +640,7 @@ function showBatchReviewModal(processedFiles) {
             const sidebarItemsHtml = fileStates.map((file, idx) => `
                 <div class="ai-sync-file-list-item ${idx === activeIndex ? 'active' : ''}" data-idx="${idx}">
                     <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
-                        <input type="checkbox" class="file-chk" data-idx="${idx}" ${file.selected ? 'checked' : ''} />
+                        <input type="checkbox" class="file-chk" data-idx="${idx}" ${file.selected ? 'checked' : ''} ${file.hasDiffError ? 'disabled' : ''} />
                         <span style="white-space: nowrap; text-overflow: ellipsis; overflow: hidden;" title="${escapeHtml(file.filePath)}">${escapeHtml(file.filePath)}</span>
                     </div>
                     <span class="ai-file-status-badge ${getStatusBadgeClass(file)}">${getStatusBadgeText(file)}</span>
@@ -644,7 +684,7 @@ function showBatchReviewModal(processedFiles) {
                                 ${currentFile.hasDiffError ? `
                                     <div class="ai-sync-alert-box ai-sync-alert-danger">
                                         <strong>Diff Error:</strong> ${escapeHtml(currentFile.diffErrorMsg)}<br>
-                                        You can edit code in "Edit Code" tab or force-overwrite with raw response.
+                                        Nothing from this patch will be written. Request a corrected diff, or use "Edit Code" to make a complete-file edit manually.
                                     </div>
                                 ` : ''}
                                 ${currentFile.validation.issues.length > 0 ? `
@@ -671,9 +711,6 @@ function showBatchReviewModal(processedFiles) {
                         <div class="ai-sync-btn-group">
                             ${currentFile.isExcerpt ? `
                                 <button class="ai-sync-btn ai-sync-btn-warning" id="btn-request-full">🛡️ Request Full File/Diff</button>
-                            ` : ''}
-                            ${currentFile.hasDiffError ? `
-                                <button class="ai-sync-btn ai-sync-btn-warning" id="btn-force-raw">📄 Overwrite with Raw Block</button>
                             ` : ''}
                             <button class="ai-sync-btn ai-sync-btn-primary" id="btn-sync-selected">
                                 💾 Sync ${fileStates.filter(f => f.selected).length} Selected File(s)
@@ -751,22 +788,15 @@ function showBatchReviewModal(processedFiles) {
                 });
                 editor.addEventListener('input', () => {
                     fileStates[activeIndex].editedContent = editor.value;
+                    if (fileStates[activeIndex].hasDiffError) {
+                        fileStates[activeIndex].hasDiffError = false;
+                        fileStates[activeIndex].diffErrorMsg = '';
+                        fileStates[activeIndex].isDiff = false;
+                        fileStates[activeIndex].selected = true;
+                    }
                     fileStates[activeIndex].validation = validateContent(fileStates[activeIndex].filePath, editor.value);
                     fileStates[activeIndex].isIdentical = (fileStates[activeIndex].originalContent || '').replace(/\r\n/g, '\n') === editor.value.replace(/\r\n/g, '\n');
                 });
-            }
-
-            const forceRawBtn = backdrop.querySelector('#btn-force-raw');
-            if (forceRawBtn) {
-                forceRawBtn.onclick = () => {
-                    fileStates[activeIndex].editedContent = fileStates[activeIndex].rawBlock;
-                    fileStates[activeIndex].hasDiffError = false;
-                    fileStates[activeIndex].isDiff = false;
-                    fileStates[activeIndex].selected = true;
-                    fileStates[activeIndex].validation = validateContent(fileStates[activeIndex].filePath, fileStates[activeIndex].rawBlock);
-                    fileStates[activeIndex].isIdentical = (fileStates[activeIndex].originalContent || '').replace(/\r\n/g, '\n') === fileStates[activeIndex].rawBlock.replace(/\r\n/g, '\n');
-                    render();
-                };
             }
 
             const requestFullBtn = backdrop.querySelector('#btn-request-full');
@@ -1070,7 +1100,7 @@ function formatCodebaseContext(files, rootName = 'workspace') {
     xml += `<file_format>\nThe content is organized as follows:\n1. This summary section\n2. Repository information\n3. Directory structure\n4. Repository files\n5. Multiple file entries, each consisting of:\n  - File path as an attribute\n  - Full contents of the file\n</file_format>\n\n`;
     xml += `<notes>\n- Total files packed: ${activeFiles.length}\n- Project root: ${rootName}\n- Files matching .gitignore and default ignore patterns were excluded\n</notes>\n</file_summary>\n\n`;
 
-    xml += `<sync_instructions>\nWhen modifying or creating code files, follow these strict formatting rules:\n1. FULL FILES: Use <file path="relative/path/to/file.ext"> with exact paths and full, complete, ready-to-save content.\n2. TARGETED DIFFS: Use SEARCH/REPLACE blocks with enough context lines to be unique.\nCRITICAL: NEVER output partial excerpts, incomplete snippets, or truncated code outside SEARCH/REPLACE format.\n</sync_instructions>\n\n`;
+    xml += `<sync_instructions>\nWhen modifying or creating files, return one canonical git unified diff inside a single SIX-backtick Markdown fence (open with six backticks followed by diff; close with six backticks). The long outer fence prevents backticks inside Markdown files from breaking the diff block. Put repository-relative paths in the diff --git, ---, and +++ headers. Use /dev/null as the old path for new files. Include enough exact unchanged context for every hunk to match. Do not put prose, excerpts, placeholders, or full unchanged files inside the diff fence.\n</sync_instructions>\n\n`;
 
     xml += `<directory_structure>\n${treeStructure}</directory_structure>\n\n`;
 
@@ -1510,10 +1540,111 @@ function isExcerptMarker(text) {
     return /\b(?:excerpt|snippet|partial)\b/i.test(text || '');
 }
 
+function extractExplicitFilePathFromText(text) {
+    const value = String(text || '').trim();
+    const pathPattern = '([a-zA-Z0-9_.\\/-]+(?:\\.[a-zA-Z0-9_-]+|\\/(?:LICENSE|Makefile|Dockerfile|Procfile)))';
+    const patterns = [
+        new RegExp(`\\b(?:file|path|filename)(?:\\s+content)?\\s*(?:for|:)\\s*[\\u0060"]?${pathPattern}[\\u0060"]?`, 'i'),
+        new RegExp(`\\b(?:complete|full|ready-to-save)\\b[^\\n]{0,100}\\b(?:file|content)\\b[^\\n]{0,50}\\bfor\\s+[\\u0060"]?${pathPattern}[\\u0060"]?`, 'i')
+    ];
+
+    for (const pattern of patterns) {
+        const match = value.match(pattern);
+        if (match && isValidFileCandidate(match[1])) return cleanCandidatePath(match[1]);
+    }
+    return null;
+}
+
+function stripOuterMarkdownFence(text) {
+    const normalized = String(text || '').replace(/\r\n/g, '\n');
+    const match = normalized.match(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1[\t ]*\n?$/);
+    return match ? match[2] : normalized;
+}
+
+function normalizeDiffPath(rawPath) {
+    if (!rawPath) return null;
+    let path = String(rawPath).trim().split(/\s+/)[0];
+    path = path.replace(/^"|"$/g, '');
+    if (path === '/dev/null') return null;
+    return cleanCandidatePath(path.replace(/^[ab]\//, ''));
+}
+
+function extractUnifiedDiffFiles(text) {
+    const source = String(text || '').replace(/\r\n/g, '\n');
+    const lines = source.split('\n');
+    const starts = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        if (/^diff --git\s+/.test(lines[i])) starts.push(i);
+    }
+
+    // Some models omit `diff --git` but retain canonical ---/+++ file headers.
+    if (starts.length === 0) {
+        for (let i = 0; i < lines.length - 1; i++) {
+            if (/^---\s+/.test(lines[i]) && /^\+\+\+\s+/.test(lines[i + 1])) starts.push(i);
+        }
+    }
+
+    const openingFenceMatch = starts.length > 0 && starts[0] > 0
+        ? lines[starts[0] - 1].match(/^(`{3,}|~{3,})diff\s*$/i)
+        : null;
+    const outerFence = openingFenceMatch ? openingFenceMatch[1] : null;
+
+    const files = [];
+    for (let index = 0; index < starts.length; index++) {
+        const start = starts[index];
+        let end = index + 1 < starts.length ? starts[index + 1] : lines.length;
+
+        // Remove only the fence paired with the known outer opening fence.
+        // A shorter fence may be legitimate context inside a Markdown file.
+        if (outerFence && index === starts.length - 1) {
+            for (let i = start + 1; i < end; i++) {
+                if (lines[i].trim() === outerFence) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+
+        const patchLines = lines.slice(start, end);
+        let oldHeader = null;
+        let newHeader = null;
+        let diffHeaderPath = null;
+
+        const diffHeader = patchLines[0].match(/^diff --git\s+(?:"?a\/(.+?)"?)\s+(?:"?b\/(.+?)"?)\s*$/);
+        if (diffHeader) diffHeaderPath = normalizeDiffPath(diffHeader[2]);
+
+        for (const line of patchLines) {
+            if (oldHeader === null) {
+                const match = line.match(/^---\s+(.+)$/);
+                if (match) oldHeader = match[1];
+            }
+            if (newHeader === null) {
+                const match = line.match(/^\+\+\+\s+(.+)$/);
+                if (match) newHeader = match[1];
+            }
+        }
+
+        const filePath = normalizeDiffPath(newHeader) || diffHeaderPath || normalizeDiffPath(oldHeader);
+        // Never trim a diff. A line containing one leading space is a real
+        // blank context line and participates in the hunk's declared counts.
+        const patch = patchLines.join('\n');
+        if (isValidFileCandidate(filePath) && /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/m.test(patch)) {
+            files.push({ filePath, content: patch });
+        }
+    }
+
+    return files;
+}
+
 function extractFilesFromRawText(text) {
     const files = [];
 
-    // 1. XML Format: <file path="...">...</file>
+    // 1. Canonical git diffs. Paths live inside the patch, so rendered Markdown
+    // cannot separate a code block from the heading that named its file.
+    files.push(...extractUnifiedDiffFiles(text));
+
+    // 2. Legacy XML format: <file path="...">...</file>
     const xmlFileRegex = /<file\s+path=["']([^"']+)["']\s*>([\s\S]*?)<\/file>/gi;
     let xmlMatch;
     while ((xmlMatch = xmlFileRegex.exec(text)) !== null) {
@@ -1524,7 +1655,7 @@ function extractFilesFromRawText(text) {
         }
     }
 
-    // 2. Markdown Header + Code Block (Supports 3, 4, 5+ backticks/tildes)
+    // 3. Legacy Markdown header + code block (supports 3, 4, 5+ fences)
     const mdHeaderBlockRegex = /(?:^|\n)(?:#{1,6}\s+|(?:\*\*|\*)?(?:File|Path|Filename)?[:\s*]*)(?:(?:\d+[\.\)]|\*|-|\+)\s*)?`?([a-zA-Z0-9_\-.\/]+\.[a-zA-Z0-9_-]+)`?[^\n]*\n+(`{3,5}|~{3,5})[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n\2/gi;
     let mdMatch;
     while ((mdMatch = mdHeaderBlockRegex.exec(text)) !== null) {
@@ -1532,6 +1663,21 @@ function extractFilesFromRawText(text) {
         const content = mdMatch[3];
         if (isValidFileCandidate(filePath)) {
             files.push({ filePath, content, isExcerpt: isExcerptMarker(mdMatch[0]) });
+        }
+    }
+
+    // 4. Natural-language file introduction followed by a code fence, e.g.
+    // "Here is the complete file content for `src/example.php`:".
+    const proseBlockRegex = /(?:^|\n)([^\n]{1,300})\n+(`{3,}|~{3,})[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n\2/g;
+    let proseMatch;
+    while ((proseMatch = proseBlockRegex.exec(text)) !== null) {
+        const filePath = extractExplicitFilePathFromText(proseMatch[1]);
+        if (filePath) {
+            files.push({
+                filePath,
+                content: proseMatch[3],
+                isExcerpt: isExcerptMarker(proseMatch[1])
+            });
         }
     }
 
@@ -1564,6 +1710,16 @@ function extractFilesFromTurn(turnElement) {
         if (!codeEl) return;
         let rawText = codeEl.innerText;
 
+        const embeddedDiffFiles = extractUnifiedDiffFiles(rawText);
+        if (embeddedDiffFiles.length > 0) {
+            embeddedDiffFiles.forEach(file => rawFiles.push({
+                ...file,
+                codeBlockElement: codeBlock,
+                isExcerpt: false
+            }));
+            return;
+        }
+
         if (!filePath) {
             const commentMatch = rawText.match(/(?:\/\/|#|\/\*|<!--)\s*(?:filepath:|file:|path:)?\s*(?:(?:\d+[\.\)]|\*|-|\+)\s*)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_-]+)/i);
             if (commentMatch && isValidFileCandidate(commentMatch[1])) {
@@ -1590,9 +1746,14 @@ function extractFilesFromTurn(turnElement) {
                     }
                 } else if (['P', 'LI'].includes(prev.tagName)) {
                     const text = prevText;
-                    const explicitMatch = text.match(/^(?:(?:###?\s*)?(?:File|Path|Filename):\s*|`)(?:(?:\d+[\.\)]|\*|-|\+)\s*)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_-]+)`?/i);
-                    if (explicitMatch && isValidFileCandidate(explicitMatch[1])) {
-                        filePath = cleanCandidatePath(explicitMatch[1]);
+                    const explicitPath = extractExplicitFilePathFromText(text);
+                    const legacyExplicitMatch = text.match(/^(?:(?:###?\s*)?(?:File|Path|Filename):\s*|`)(?:(?:\d+[\.\)]|\*|-|\+)\s*)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_-]+)`?/i);
+                    if (explicitPath) {
+                        filePath = explicitPath;
+                        break;
+                    }
+                    if (legacyExplicitMatch && isValidFileCandidate(legacyExplicitMatch[1])) {
+                        filePath = cleanCandidatePath(legacyExplicitMatch[1]);
                         break;
                     }
                 }
@@ -1627,16 +1788,24 @@ function extractFilesFromTurn(turnElement) {
         }
     });
 
-    // Deduplication: Group by filePath and retain the largest, most complete block
+    // Deduplication: prefer a canonical diff and preserve the DOM code-block
+    // reference so the per-block Sync button still works.
     const fileMap = new Map();
     for (const file of rawFiles) {
         if (!fileMap.has(file.filePath)) {
             fileMap.set(file.filePath, file);
         } else {
             const existing = fileMap.get(file.filePath);
-            if (file.content.length > existing.content.length) {
-                fileMap.set(file.filePath, file);
+            const existingIsDiff = isUnifiedDiff(existing.content);
+            const candidateIsDiff = isUnifiedDiff(file.content);
+            const useCandidate = (candidateIsDiff && !existingIsDiff) ||
+                (candidateIsDiff === existingIsDiff && file.content.length > existing.content.length);
+            const selected = useCandidate ? file : existing;
+            const other = useCandidate ? existing : file;
+            if (!selected.codeBlockElement && other.codeBlockElement) {
+                selected.codeBlockElement = other.codeBlockElement;
             }
+            fileMap.set(file.filePath, selected);
         }
     }
 
@@ -1664,12 +1833,15 @@ async function syncFileBatch(dirHandle, fileEntries) {
         } catch (err) {
             hasDiffError = true;
             diffErrorMsg = err.message;
-            targetContent = file.content;
+            // Keep review anchored to the actual file. Treating raw diff text
+            // as replacement content produces a misleading full-file rewrite
+            // and could write patch syntax into the source file.
+            targetContent = originalText || '';
             isDiff = isDiffContent(file.content);
         }
 
         const validation = validateContent(file.filePath, targetContent);
-        const isIdentical = originalText !== null && (originalText.replace(/\r\n/g, '\n') === targetContent.replace(/\r\n/g, '\n'));
+        const isIdentical = !hasDiffError && originalText !== null && (originalText.replace(/\r\n/g, '\n') === targetContent.replace(/\r\n/g, '\n'));
 
         processedFiles.push({
             filePath: file.filePath,
@@ -2082,10 +2254,24 @@ function createFloatingToolbar() {
 // 13. Initialization
 // ==========================================
 
-createFloatingToolbar();
-setupPersistentDirectory();
+if (typeof document !== 'undefined') {
+    createFloatingToolbar();
+    setupPersistentDirectory();
 
-const observer = new MutationObserver(() => {
-    injectUI();
-});
-observer.observe(document.body, { childList: true, subtree: true });
+    const observer = new MutationObserver(() => {
+        injectUI();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        applySearchReplace,
+        applyUnifiedPatch,
+        extractFilesFromRawText,
+        extractUnifiedDiffFiles,
+        isDiffContent,
+        processDiffOrDirectContent,
+        stripOuterMarkdownFence
+    };
+}
