@@ -85,6 +85,23 @@ function showToast(message, type = 'info', duration = 3500) {
     }, duration);
 }
 
+const STRICT_SYNC_FORMAT_PROMPT = `Please output code changes using one of these formats only:
+
+1. Complete files: <file path="relative/path/to/file.ext"> followed by the full, ready-to-save file content and </file>.
+2. Targeted patches: SEARCH/REPLACE blocks with enough context to be unique:
+${'<<<<<<<'} SEARCH
+exact existing lines
+${'======='}
+replacement lines
+${'>>>>>>> REPLACE'}
+
+Do not provide partial excerpts, snippets, placeholders, or truncated code outside SEARCH/REPLACE blocks.`;
+
+async function insertStrictSyncFormatPrompt() {
+    await insertIntoPrompt(STRICT_SYNC_FORMAT_PROMPT);
+    showToast('Appended sync format rules to prompt!', 'success');
+}
+
 // ==========================================
 // 3. File System Operations & Traversal
 // ==========================================
@@ -557,7 +574,7 @@ function showBatchReviewModal(processedFiles) {
 
         const fileStates = processedFiles.map(f => ({
             ...f,
-            selected: !f.hasDiffError && !f.isIdentical,
+            selected: !f.hasDiffError && !f.isExcerpt && !f.isIdentical,
             editedContent: f.targetContent
         }));
 
@@ -610,6 +627,7 @@ function showBatchReviewModal(processedFiles) {
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <strong style="color: #38bdf8; font-size: 13px;">${escapeHtml(currentFile.filePath)}</strong>
                                     ${currentFile.isDiff ? '<span class="ai-file-status-badge badge-diff">Diff Merged</span>' : ''}
+                                    ${currentFile.isExcerpt ? '<span class="ai-file-status-badge badge-warn">EXCERPT</span>' : ''}
                                     ${currentFile.isIdentical ? '<span class="ai-file-status-badge badge-same">No Changes</span>' : ''}
                                 </div>
                                 <div class="ai-sync-view-tabs">
@@ -618,6 +636,11 @@ function showBatchReviewModal(processedFiles) {
                                 </div>
                             </div>
                             <div class="ai-sync-main-body">
+                                ${currentFile.isExcerpt ? `
+                                    <div class="ai-sync-alert-box ai-sync-alert-warning">
+                                        <strong>EXCERPT DETECTED:</strong> This block appears to be partial code and is excluded from syncing by default. Request the complete file or a SEARCH/REPLACE patch before saving.
+                                    </div>
+                                ` : ''}
                                 ${currentFile.hasDiffError ? `
                                     <div class="ai-sync-alert-box ai-sync-alert-danger">
                                         <strong>Diff Error:</strong> ${escapeHtml(currentFile.diffErrorMsg)}<br>
@@ -646,6 +669,9 @@ function showBatchReviewModal(processedFiles) {
                     <div class="ai-sync-modal-footer">
                         <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-skip-all">Skip All (Esc)</button>
                         <div class="ai-sync-btn-group">
+                            ${currentFile.isExcerpt ? `
+                                <button class="ai-sync-btn ai-sync-btn-warning" id="btn-request-full">🛡️ Request Full File/Diff</button>
+                            ` : ''}
                             ${currentFile.hasDiffError ? `
                                 <button class="ai-sync-btn ai-sync-btn-warning" id="btn-force-raw">📄 Overwrite with Raw Block</button>
                             ` : ''}
@@ -661,6 +687,7 @@ function showBatchReviewModal(processedFiles) {
         }
 
         function getStatusBadgeClass(file) {
+            if (file.isExcerpt) return 'badge-warn';
             if (file.hasDiffError) return 'badge-err';
             if (file.validation.issues.length > 0) return 'badge-err';
             if (file.validation.warnings.length > 0) return 'badge-warn';
@@ -670,6 +697,7 @@ function showBatchReviewModal(processedFiles) {
         }
 
         function getStatusBadgeText(file) {
+            if (file.isExcerpt) return 'EXCERPT';
             if (file.hasDiffError) return 'DIFF ERR';
             if (file.validation.issues.length > 0) return 'SYNTAX';
             if (file.validation.warnings.length > 0) return 'WARN';
@@ -738,6 +766,15 @@ function showBatchReviewModal(processedFiles) {
                     fileStates[activeIndex].validation = validateContent(fileStates[activeIndex].filePath, fileStates[activeIndex].rawBlock);
                     fileStates[activeIndex].isIdentical = (fileStates[activeIndex].originalContent || '').replace(/\r\n/g, '\n') === fileStates[activeIndex].rawBlock.replace(/\r\n/g, '\n');
                     render();
+                };
+            }
+
+            const requestFullBtn = backdrop.querySelector('#btn-request-full');
+            if (requestFullBtn) {
+                requestFullBtn.onclick = async () => {
+                    const file = fileStates[activeIndex];
+                    await insertIntoPrompt(`The response for "${file.filePath}" was marked as an excerpt. Please provide either the complete file or a precise SEARCH/REPLACE patch.\n\n${STRICT_SYNC_FORMAT_PROMPT}`);
+                    showToast(`Requested complete output for ${file.filePath}`, 'success');
                 };
             }
 
@@ -1032,6 +1069,8 @@ function formatCodebaseContext(files, rootName = 'workspace') {
     xml += `<purpose>\nThis file contains a packed representation of the entire repository's contents.\nIt is designed to be easily consumable by AI systems for analysis, code review,\nor other automated processes.\n</purpose>\n\n`;
     xml += `<file_format>\nThe content is organized as follows:\n1. This summary section\n2. Repository information\n3. Directory structure\n4. Repository files\n5. Multiple file entries, each consisting of:\n  - File path as an attribute\n  - Full contents of the file\n</file_format>\n\n`;
     xml += `<notes>\n- Total files packed: ${activeFiles.length}\n- Project root: ${rootName}\n- Files matching .gitignore and default ignore patterns were excluded\n</notes>\n</file_summary>\n\n`;
+
+    xml += `<sync_instructions>\nWhen modifying or creating code files, follow these strict formatting rules:\n1. FULL FILES: Use <file path="relative/path/to/file.ext"> with exact paths and full, complete, ready-to-save content.\n2. TARGETED DIFFS: Use SEARCH/REPLACE blocks with enough context lines to be unique.\nCRITICAL: NEVER output partial excerpts, incomplete snippets, or truncated code outside SEARCH/REPLACE format.\n</sync_instructions>\n\n`;
 
     xml += `<directory_structure>\n${treeStructure}</directory_structure>\n\n`;
 
@@ -1436,8 +1475,8 @@ function handleSkippedFilesResolution(skippedFiles) {
 // ==========================================
 
 function isValidFileCandidate(candidate) {
-    if (!candidate || candidate.length > 200) return false;
-    const clean = candidate.trim().replace(/^[`"']|[`"']$/g, '');
+    if (!candidate || candidate.length > 220) return false;
+    const clean = cleanCandidatePath(candidate);
     if (/^(?:https?:\/\/|www\.|git@|mailto:)/i.test(clean)) return false;
     if (/(?:github\.com|gitlab\.com|shields\.io|google\.com|localhost|mozilla\.org)/i.test(clean)) return false;
 
@@ -1451,10 +1490,24 @@ function isValidFileCandidate(candidate) {
     if (!extMatch) return false;
     const ext = extMatch[1].toLowerCase();
 
-    const invalidExts = new Set(['com', 'org', 'net', 'io', 'dev', 'app', 'ai', 'co', 'uk', 'html#', 'md#']);
-    if (invalidExts.has(ext)) return false;
+    const invalidExts = new Set(['com', 'org', 'net', 'io', 'dev', 'app', 'ai', 'co', 'uk', 'html#', 'md#', 'pl']);
+    if (invalidExts.has(ext) && !clean.includes('/')) return false;
 
     return true;
+}
+
+function cleanCandidatePath(raw) {
+    if (!raw) return null;
+    let clean = String(raw).trim();
+    clean = clean.replace(/^(?:#{1,6}\s*)?(?:\d+[\.\)]|\*|-|\+)\s+/, '');
+    clean = clean.replace(/[`"'*]/g, '').trim();
+    clean = clean.replace(/\s*\([^)]*\)\s*$/i, '').trim();
+    clean = clean.replace(/\s*[-—:]\s*(?:excerpt|snippet|diff|patch|part|update).*$/i, '').trim();
+    return clean;
+}
+
+function isExcerptMarker(text) {
+    return /\b(?:excerpt|snippet|partial)\b/i.test(text || '');
 }
 
 function extractFilesFromRawText(text) {
@@ -1464,21 +1517,21 @@ function extractFilesFromRawText(text) {
     const xmlFileRegex = /<file\s+path=["']([^"']+)["']\s*>([\s\S]*?)<\/file>/gi;
     let xmlMatch;
     while ((xmlMatch = xmlFileRegex.exec(text)) !== null) {
-        const filePath = xmlMatch[1].trim();
+        const filePath = cleanCandidatePath(xmlMatch[1]);
         const content = xmlMatch[2].trim();
         if (isValidFileCandidate(filePath)) {
-            files.push({ filePath: filePath.replace(/^[`"']|[`"']$/g, ''), content });
+            files.push({ filePath, content });
         }
     }
 
     // 2. Markdown Header + Code Block (Supports 3, 4, 5+ backticks/tildes)
-    const mdHeaderBlockRegex = /(?:^|\n)(?:#{1,6}\s+|(?:\*\*|\*)?(?:File|Path|Filename)?[:\s*]*)`?([a-zA-Z0-9_\-\.\/]+)`?[^\n]*\n+(`{3,5}|~{3,5})[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n\2/gi;
+    const mdHeaderBlockRegex = /(?:^|\n)(?:#{1,6}\s+|(?:\*\*|\*)?(?:File|Path|Filename)?[:\s*]*)(?:(?:\d+[\.\)]|\*|-|\+)\s*)?`?([a-zA-Z0-9_\-.\/]+\.[a-zA-Z0-9_-]+)`?[^\n]*\n+(`{3,5}|~{3,5})[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n\2/gi;
     let mdMatch;
     while ((mdMatch = mdHeaderBlockRegex.exec(text)) !== null) {
-        const filePath = mdMatch[1].trim();
+        const filePath = cleanCandidatePath(mdMatch[1]);
         const content = mdMatch[3];
         if (isValidFileCandidate(filePath)) {
-            files.push({ filePath: filePath.replace(/^[`"']|[`"']$/g, ''), content });
+            files.push({ filePath, content, isExcerpt: isExcerptMarker(mdMatch[0]) });
         }
     }
 
@@ -1498,11 +1551,13 @@ function extractFilesFromTurn(turnElement) {
 
     codeBlocks.forEach((codeBlock) => {
         let filePath = null;
+        let isExcerpt = false;
 
         const containerHtml = codeBlock.parentElement ? codeBlock.parentElement.innerHTML : '';
         const tagMatch = containerHtml.match(/<(?:file|artifact|code)[^>]+(?:path|filename|name)=["']([^"']+)["']/i);
         if (tagMatch && isValidFileCandidate(tagMatch[1])) {
-            filePath = tagMatch[1];
+            filePath = cleanCandidatePath(tagMatch[1]);
+            isExcerpt = isExcerptMarker(containerHtml);
         }
 
         const codeEl = codeBlock.querySelector('pre code');
@@ -1510,9 +1565,9 @@ function extractFilesFromTurn(turnElement) {
         let rawText = codeEl.innerText;
 
         if (!filePath) {
-            const commentMatch = rawText.match(/(?:\/\/|#|\/\*|<!--)\s*(?:filepath:|file:|path:)?\s*([a-zA-Z0-9_\-\.\/]+)/i);
+            const commentMatch = rawText.match(/(?:\/\/|#|\/\*|<!--)\s*(?:filepath:|file:|path:)?\s*(?:(?:\d+[\.\)]|\*|-|\+)\s*)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_-]+)/i);
             if (commentMatch && isValidFileCandidate(commentMatch[1])) {
-                filePath = commentMatch[1];
+                filePath = cleanCandidatePath(commentMatch[1]);
             }
         }
 
@@ -1524,18 +1579,20 @@ function extractFilesFromTurn(turnElement) {
                     break;
                 }
 
-                if (['H1', 'H2', 'H3', 'H4', 'H5'].includes(prev.tagName)) {
-                    const text = prev.innerText.trim();
-                    const labelMatch = text.match(/(?:file|path|filename)?[:\s*]*[`"]?([a-zA-Z0-9_\-\.\/]+)[`"]?/i);
+                const prevText = prev.innerText.trim();
+                if (isExcerptMarker(prevText)) isExcerpt = true;
+
+                if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(prev.tagName)) {
+                    const labelMatch = prevText.match(/(?:file|path|filename)?[:\s*]*(?:(?:\d+[\.\)]|\*|-|\+)\s*)?[`"]?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_-]+)[`"]?/i);
                     if (labelMatch && isValidFileCandidate(labelMatch[1])) {
-                        filePath = labelMatch[1];
+                        filePath = cleanCandidatePath(labelMatch[1]);
                         break;
                     }
                 } else if (['P', 'LI'].includes(prev.tagName)) {
-                    const text = prev.innerText.trim();
-                    const explicitMatch = text.match(/^(?:(?:###?\s*)?(?:File|Path|Filename):\s*|`)([a-zA-Z0-9_\-\.\/]+)`?$/i);
+                    const text = prevText;
+                    const explicitMatch = text.match(/^(?:(?:###?\s*)?(?:File|Path|Filename):\s*|`)(?:(?:\d+[\.\)]|\*|-|\+)\s*)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_-]+)`?/i);
                     if (explicitMatch && isValidFileCandidate(explicitMatch[1])) {
-                        filePath = explicitMatch[1];
+                        filePath = cleanCandidatePath(explicitMatch[1]);
                         break;
                     }
                 }
@@ -1544,11 +1601,28 @@ function extractFilesFromTurn(turnElement) {
             }
         }
 
+        // A path may have been found in a code comment or tag; still inspect
+        // nearby prose so an excerpt marker cannot be missed.
+        if (filePath && !isExcerpt) {
+            let prev = codeBlock.previousElementSibling;
+            let distance = 0;
+            while (prev && distance < 3) {
+                if (prev.tagName === 'MS-CODE-BLOCK' || prev.querySelector('ms-code-block') || prev.tagName === 'HR') break;
+                if (isExcerptMarker(prev.innerText || prev.textContent || '')) {
+                    isExcerpt = true;
+                    break;
+                }
+                prev = prev.previousElementSibling;
+                distance++;
+            }
+        }
+
         if (filePath) {
             rawFiles.push({
-                filePath: filePath.trim().replace(/^[`"']|[`"']$/g, ''),
+                filePath: cleanCandidatePath(filePath),
                 content: rawText,
-                codeBlockElement: codeBlock
+                codeBlockElement: codeBlock,
+                isExcerpt
             });
         }
     });
@@ -1606,6 +1680,7 @@ async function syncFileBatch(dirHandle, fileEntries) {
             hasDiffError,
             diffErrorMsg,
             isIdentical,
+            isExcerpt: Boolean(file.isExcerpt),
             validation
         });
     }
@@ -1615,7 +1690,7 @@ async function syncFileBatch(dirHandle, fileEntries) {
         return { writtenCount: processedFiles.length, skipped: [], alreadyIdentical: true };
     }
 
-    const needsReview = processedFiles.some(f => !f.isIdentical && (!f.validation.valid || f.hasDiffError || f.isDiff));
+    const needsReview = processedFiles.some(f => !f.isIdentical && (!f.validation.valid || f.hasDiffError || f.isDiff || f.isExcerpt));
     let filesToWrite = [];
 
     if (needsReview || processedFiles.length > 1) {
@@ -1664,7 +1739,10 @@ async function updateFileStatusBadges(turn) {
         const isDiff = isDiffContent(file.content);
         const isIdentical = exists && (localContent.replace(/\r\n/g, '\n') === file.content.replace(/\r\n/g, '\n'));
 
-        if (isIdentical) {
+        if (file.isExcerpt) {
+            badge.className = 'ai-file-status-badge ai-block-badge badge-warn';
+            badge.innerText = 'EXCERPT';
+        } else if (isIdentical) {
             badge.className = 'ai-file-status-badge ai-block-badge badge-same';
             badge.innerText = 'SAME';
         } else if (isDiff) {
@@ -1815,6 +1893,7 @@ function createFloatingToolbar() {
         <button id="btn-context-menu">📎 Context ▾</button>
         <div id="ai-sync-context-dropdown" class="ai-sync-dropdown-menu" style="display: none;">
             <button class="ai-sync-dropdown-item ai-sync-dropdown-item-featured" id="btn-pack-context">📊 Pack Codebase Context</button>
+            <button class="ai-sync-dropdown-item" id="btn-insert-diff-prompt">📋 Insert Diff Format Instructions</button>
             <button class="ai-sync-dropdown-item" id="btn-attach-tree">🌳 Insert Directory Tree</button>
             <button class="ai-sync-dropdown-item" id="btn-attach-file">📄 Attach Local File</button>
         </div>
@@ -1956,6 +2035,8 @@ function createFloatingToolbar() {
             showToast(`Context packing failed: ${err.message}`, 'error');
         }
     };
+
+    document.getElementById('btn-insert-diff-prompt').onclick = insertStrictSyncFormatPrompt;
 
     document.getElementById('btn-attach-tree').onclick = async () => {
         if (!rootDirHandle) {
