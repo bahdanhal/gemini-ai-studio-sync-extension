@@ -1,6 +1,126 @@
 let rootDirHandle = null;
 let undoHistory = [];
 
+// ==========================================
+// 0. Localization
+const STATUS_LABELS = {
+    en: { syntax: 'SYNTAX', warn: 'WARN', same: 'SAME', diff: 'DIFF', new: 'NEW', mod: 'MOD' },
+    es: { syntax: 'SINTAXIS', warn: 'AVISO', same: 'IGUAL', diff: 'DIFF', new: 'NUEVO', mod: 'MOD' },
+    pt: { syntax: 'SINTAXE', warn: 'AVISO', same: 'IGUAL', diff: 'DIFF', new: 'NOVO', mod: 'MOD' },
+    fr: { syntax: 'SYNTAXE', warn: 'AVERT.', same: 'IDENTIQUE', diff: 'DIFF', new: 'NOUVEAU', mod: 'MOD' },
+    pl: { syntax: 'SKŁADNIA', warn: 'UWAGA', same: 'TAKI SAM', diff: 'DIFF', new: 'NOWY', mod: 'MOD' },
+    be: { syntax: 'СІНТАКСІС', warn: 'УВАГА', same: 'ТОЙ ЖА', diff: 'DIFF', new: 'НОВЫ', mod: 'ЗМЕНЕНЫ' },
+    uk: { syntax: 'СИНТАКСИС', warn: 'УВАГА', same: 'БЕЗ ЗМІН', diff: 'DIFF', new: 'НОВИЙ', mod: 'ЗМІНЕНО' },
+    zh: { syntax: '语法', warn: '警告', same: '相同', diff: '差异', new: '新增', mod: '修改' },
+    ja: { syntax: '構文', warn: '警告', same: '同一', diff: '差分', new: '新規', mod: '変更' },
+    ru: { syntax: 'СИНТАКСИС', warn: 'ВНИМАНИЕ', same: 'БЕЗ ИЗМЕНЕНИЙ', diff: 'РАЗНИЦА', new: 'НОВЫЙ', mod: 'ИЗМЕНЁН' },
+    ar: { syntax: 'بنية', warn: 'تحذير', same: 'مطابق', diff: 'فرق', new: 'جديد', mod: 'معدّل' },
+    hi: { syntax: 'सिंटैक्स', warn: 'चेतावनी', same: 'समान', diff: 'अंतर', new: 'नया', mod: 'संशोधित' },
+    ur: { syntax: 'نحو', warn: 'انتباہ', same: 'یکساں', diff: 'فرق', new: 'نیا', mod: 'ترمیم شدہ' },
+    bn: { syntax: 'সিনট্যাক্স', warn: 'সতর্কতা', same: 'একই', diff: 'পার্থক্য', new: 'নতুন', mod: 'পরিবর্তিত' },
+    id: { syntax: 'SINTAKS', warn: 'PERINGATAN', same: 'SAMA', diff: 'DIFF', new: 'BARU', mod: 'DIUBAH' },
+    de: { syntax: 'SYNTAX', warn: 'WARNUNG', same: 'GLEICH', diff: 'DIFF', new: 'NEU', mod: 'GEÄNDERT' },
+    tr: { syntax: 'SÖZDİZİMİ', warn: 'UYARI', same: 'AYNI', diff: 'FARK', new: 'YENİ', mod: 'DEĞİŞTİ'
+    }
+};
+const DIFF_ERROR_LABELS = { en: 'DIFF ERR', es: 'ERROR DIFF', pt: 'ERRO DIFF', fr: 'ERREUR DIFF', pl: 'BŁĄD DIFF', be: 'ПАМЫЛКА DIFF', uk: 'ПОМИЛКА DIFF', zh: 'DIFF 错误', ja: 'DIFF エラー', ru: 'ОШИБКА DIFF', ar: 'خطأ DIFF', hi: 'DIFF त्रुटि', ur: 'DIFF خرابی', bn: 'DIFF ত্রুটি', id: 'EROR DIFF', de: 'DIFF-FEHLER', tr: 'DIFF HATASI' };
+// ==========================================
+
+const I18N = {
+    en: {
+        connectRoot: 'Connect Project Root', change: 'Change', regrant: 'Re-grant',
+        noFolder: 'No folder connected', undo: 'Undo', context: 'Context',
+        packContext: 'Pack Codebase Context', diffInstructions: 'Insert Diff Format Instructions',
+        directoryTree: 'Insert Directory Tree', attachFile: 'Attach Local File',
+        visualDiff: 'Visual Diff', editCode: 'Edit Code', filesToSync: 'Files to Sync',
+        selected: 'selected', cancel: 'Cancel', skipAll: 'Skip All', requestFull: 'Request Full File/Diff',
+        syncSelected: 'Sync {count} Selected File(s)', diffMerged: 'Diff Merged', noChanges: 'No Changes',
+        excerpt: 'EXCERPT', excerptDetected: 'EXCERPT DETECTED:', excerptHelp: 'This block appears to be partial code and is excluded from syncing by default. Request the complete file or a SEARCH/REPLACE patch before saving.',
+        diffError: 'Diff Error:', diffErrorHelp: 'Nothing from this patch will be written. Request a corrected diff, or use "Edit Code" to make a complete-file edit manually.',
+        syntaxIssues: 'Syntax Issues:', placeholders: 'Placeholders Detected:',
+        searchFiles: 'Search files...', excludeGlobs: 'Exclude globs (e.g. *.test.ts, docs/*)', applyGlobs: 'Apply Globs',
+        expandAll: 'Expand All', collapseAll: 'Collapse All', selectAll: 'Select All', deselectAll: 'Deselect All',
+        folderStructure: 'Folder & File Structure (Sorted from Max Tokens)', tokensUsage: 'Tokens & Usage %', size: 'Size',
+        noMatchingFiles: 'No files matching filter.', copyContext: 'Copy Context XML', insertContext: 'Insert Context (~{tokens}) into Prompt',
+        syncToDisk: 'Sync to Disk', writing: 'Writing {count} file(s)...', upToDate: 'Up to Date', synced: 'Synced {written}/{total}',
+        saved: 'Saved', skipped: 'Skipped', error: 'Error', sync: 'Sync',
+        connectFirst: 'Connect your project folder first!', noValidFiles: 'No files with valid paths detected.',
+        undoNone: 'Nothing to undo.', reverted: '↩️ Reverted {count} file(s) to previous state.',
+        appendedRules: 'Appended sync format rules to prompt!', restored: 'Restored connection to {name}',
+        connected: 'Connected to {name}', reconnected: 'Re-connected to {name}',
+        scanning: 'Scanning codebase & parsing recursive .gitignore rules...', noSource: 'No source files found after applying gitignore.',
+        packingFailed: 'Context packing failed: {error}', generatingTree: 'Generating directory tree...',
+        treeAdded: 'Directory tree added to prompt!', treeFailed: 'Tree generation failed: {error}',
+        filePathPrompt: 'Enter relative path to attach (e.g. src/index.ts):', fileNotFound: 'File not found: {path}',
+        attached: 'Attached {path} to prompt!', readFailed: 'Failed to read file: {error}',
+        excluded: 'Excluded {count} file(s) matching custom pattern(s)', copied: '📋 Codebase context copied to clipboard!',
+        packed: '📥 Packed codebase context ({count} files) into prompt attachment!', skippedPrompt: '{count} file(s) skipped and appended to prompt.',
+        syncSuccess: 'Successfully synced {count} file(s)!', syncError: 'Sync error: {error}', writeFailed: 'Write failed: {error}',
+        syncTitle: 'Sync {path} to disk', drag: 'Drag to reposition',
+        diffPrompt: 'The response for "{path}" was marked as an excerpt. Please provide either the complete file or a precise SEARCH/REPLACE patch.'
+    },
+    es: {
+        connectRoot: 'Conectar raíz del proyecto', change: 'Cambiar', regrant: 'Conceder de nuevo', noFolder: 'Ninguna carpeta conectada', undo: 'Deshacer', context: 'Contexto', packContext: 'Empaquetar contexto del código', diffInstructions: 'Insertar instrucciones de formato diff', directoryTree: 'Insertar árbol de directorios', attachFile: 'Adjuntar archivo local', visualDiff: 'Diff visual', editCode: 'Editar código', filesToSync: 'Archivos para sincronizar', selected: 'seleccionados', cancel: 'Cancelar', skipAll: 'Omitir todo', requestFull: 'Solicitar archivo/diff completo', syncSelected: 'Sincronizar {count} archivo(s) seleccionado(s)', diffMerged: 'Diff combinado', noChanges: 'Sin cambios', excerpt: 'FRAGMENTO', excerptDetected: 'FRAGMENTO DETECTADO:', excerptHelp: 'Este bloque parece código parcial y se excluye por defecto. Solicita el archivo completo o un parche SEARCH/REPLACE antes de guardarlo.', diffError: 'Error de diff:', diffErrorHelp: 'No se escribirá nada de este parche. Solicita un diff corregido o usa «Editar código» para editar el archivo completo.', syntaxIssues: 'Problemas de sintaxis:', placeholders: 'Marcadores detectados:', searchFiles: 'Buscar archivos...', excludeGlobs: 'Excluir patrones (p. ej. *.test.ts, docs/*)', applyGlobs: 'Aplicar patrones', expandAll: 'Expandir todo', collapseAll: 'Contraer todo', selectAll: 'Seleccionar todo', deselectAll: 'Deseleccionar todo', folderStructure: 'Estructura de carpetas y archivos (ordenada por tokens)', tokensUsage: 'Tokens y uso %', size: 'Tamaño', noMatchingFiles: 'No hay archivos que coincidan.', copyContext: 'Copiar XML del contexto', insertContext: 'Insertar contexto (~{tokens}) en el prompt', syncToDisk: 'Sincronizar con disco', writing: 'Escribiendo {count} archivo(s)...', upToDate: 'Actualizado', synced: 'Sincronizados {written}/{total}', saved: 'Guardado', skipped: 'Omitido', error: 'Error', sync: 'Sincronizar', connectFirst: '¡Conecta primero la carpeta del proyecto!', noValidFiles: 'No se detectaron archivos con rutas válidas.', undoNone: 'Nada que deshacer.', reverted: '↩️ Se revirtieron {count} archivo(s) al estado anterior.', appendedRules: '¡Reglas de formato añadidas al prompt!', restored: 'Conexión restaurada con {name}', connected: 'Conectado a {name}', reconnected: 'Conexión restablecida con {name}', scanning: 'Analizando el código y las reglas .gitignore recursivas...', noSource: 'No se encontraron archivos fuente tras aplicar gitignore.', packingFailed: 'Error al empaquetar el contexto: {error}', generatingTree: 'Generando árbol de directorios...', treeAdded: '¡Árbol de directorios añadido al prompt!', treeFailed: 'Error al generar el árbol: {error}', filePathPrompt: 'Introduce la ruta relativa que quieres adjuntar (p. ej. src/index.ts):', fileNotFound: 'Archivo no encontrado: {path}', attached: '¡{path} adjuntado al prompt!', readFailed: 'Error al leer el archivo: {error}', excluded: 'Se excluyeron {count} archivo(s) según los patrones', copied: '📋 ¡Contexto del código copiado al portapapeles!', packed: '📥 ¡Contexto empaquetado ({count} archivos) como adjunto del prompt!', skippedPrompt: 'Se omitieron {count} archivo(s) y se añadieron al prompt.', syncSuccess: '¡{count} archivo(s) sincronizado(s) correctamente!', syncError: 'Error de sincronización: {error}', writeFailed: 'Error de escritura: {error}', syncTitle: 'Sincronizar {path} con el disco', drag: 'Arrastra para cambiar de posición', diffPrompt: 'La respuesta para «{path}» se marcó como fragmento. Proporciona el archivo completo o un parche SEARCH/REPLACE preciso.'
+    },
+    pt: {
+        connectRoot: 'Conectar raiz do projeto', change: 'Alterar', regrant: 'Conceder novamente', noFolder: 'Nenhuma pasta conectada', undo: 'Desfazer', context: 'Contexto', packContext: 'Empacotar contexto da base de código', diffInstructions: 'Inserir instruções de formato diff', directoryTree: 'Inserir árvore de diretórios', attachFile: 'Anexar arquivo local', visualDiff: 'Diff visual', editCode: 'Editar código', filesToSync: 'Arquivos para sincronizar', selected: 'selecionados', cancel: 'Cancelar', skipAll: 'Ignorar tudo', requestFull: 'Solicitar arquivo/diff completo', syncSelected: 'Sincronizar {count} arquivo(s) selecionado(s)', diffMerged: 'Diff mesclado', noChanges: 'Sem alterações', excerpt: 'TRECHO', excerptDetected: 'TRECHO DETECTADO:', excerptHelp: 'Este bloco parece ser código parcial e é excluído por padrão. Solicite o arquivo completo ou um patch SEARCH/REPLACE antes de salvar.', diffError: 'Erro de diff:', diffErrorHelp: 'Nada deste patch será gravado. Solicite um diff corrigido ou use “Editar código” para editar o arquivo completo.', syntaxIssues: 'Problemas de sintaxe:', placeholders: 'Marcadores detectados:', searchFiles: 'Pesquisar arquivos...', excludeGlobs: 'Excluir padrões (ex.: *.test.ts, docs/*)', applyGlobs: 'Aplicar padrões', expandAll: 'Expandir tudo', collapseAll: 'Recolher tudo', selectAll: 'Selecionar tudo', deselectAll: 'Desmarcar tudo', folderStructure: 'Estrutura de pastas e arquivos (ordenada por tokens)', tokensUsage: 'Tokens e uso %', size: 'Tamanho', noMatchingFiles: 'Nenhum arquivo corresponde ao filtro.', copyContext: 'Copiar XML do contexto', insertContext: 'Inserir contexto (~{tokens}) no prompt', syncToDisk: 'Sincronizar com disco', writing: 'Gravando {count} arquivo(s)...', upToDate: 'Atualizado', synced: 'Sincronizados {written}/{total}', saved: 'Salvo', skipped: 'Ignorado', error: 'Erro', sync: 'Sincronizar', connectFirst: 'Conecte primeiro a pasta do projeto!', noValidFiles: 'Nenhum arquivo com caminho válido foi detectado.', undoNone: 'Nada para desfazer.', reverted: '↩️ {count} arquivo(s) revertido(s) ao estado anterior.', appendedRules: 'Regras de formato adicionadas ao prompt!', restored: 'Conexão restaurada com {name}', connected: 'Conectado a {name}', reconnected: 'Reconectado a {name}', scanning: 'Analisando a base de código e regras .gitignore recursivas...', noSource: 'Nenhum arquivo de código encontrado após aplicar o gitignore.', packingFailed: 'Falha ao empacotar o contexto: {error}', generatingTree: 'Gerando árvore de diretórios...', treeAdded: 'Árvore de diretórios adicionada ao prompt!', treeFailed: 'Falha ao gerar a árvore: {error}', filePathPrompt: 'Digite o caminho relativo para anexar (ex.: src/index.ts):', fileNotFound: 'Arquivo não encontrado: {path}', attached: '{path} anexado ao prompt!', readFailed: 'Falha ao ler o arquivo: {error}', excluded: '{count} arquivo(s) excluído(s) pelos padrões', copied: '📋 Contexto da base de código copiado para a área de transferência!', packed: '📥 Contexto empacotado ({count} arquivos) inserido como anexo no prompt!', skippedPrompt: '{count} arquivo(s) ignorado(s) e adicionado(s) ao prompt.', syncSuccess: '{count} arquivo(s) sincronizado(s) com sucesso!', syncError: 'Erro de sincronização: {error}', writeFailed: 'Falha ao gravar: {error}', syncTitle: 'Sincronizar {path} com o disco', drag: 'Arraste para reposicionar', diffPrompt: 'A resposta para “{path}” foi marcada como trecho. Forneça o arquivo completo ou um patch SEARCH/REPLACE preciso.'
+    },
+    fr: {}, pl: {}, be: {}, uk: {}, zh: {}, ja: {}, ru: {}, ar: {}, hi: {}, ur: {}, bn: {}, id: {}, de: {}, tr: {}
+};
+
+// Locale aliases follow the browser's regional language tag.
+const LOCALE_ALIASES = { 'pt-BR': 'pt', 'zh-CN': 'zh', 'zh-TW': 'zh', 'be-BY': 'be', 'uk-UA': 'uk', 'ru-RU': 'ru', 'ar-SA': 'ar', 'hi-IN': 'hi', 'ur-PK': 'ur', 'bn-BD': 'bn', 'id-ID': 'id', 'de-DE': 'de', 'tr-TR': 'tr', 'es-ES': 'es', 'fr-FR': 'fr', 'pl-PL': 'pl', 'ja-JP': 'ja' };
+const EXTRA_TRANSLATIONS = {
+    en: { statusSyntax: 'SYNTAX', statusWarn: 'WARN', statusSame: 'SAME', statusDiff: 'DIFF', statusNew: 'NEW', statusMod: 'MOD', undoFailed: 'Failed to undo: {error}', requestedFull: 'Requested complete output for {path}', allUpToDate: 'All files are already up to date!' },
+    es: { statusSyntax: 'SINTAXIS', statusWarn: 'AVISO', statusSame: 'IGUAL', statusDiff: 'DIFF', statusNew: 'NUEVO', statusMod: 'MOD', undoFailed: 'Error al deshacer: {error}', requestedFull: 'Salida completa solicitada para {path}', allUpToDate: 'Todos los archivos ya están actualizados.' },
+    pt: { statusSyntax: 'SINTAXE', statusWarn: 'AVISO', statusSame: 'IGUAL', statusDiff: 'DIFF', statusNew: 'NOVO', statusMod: 'MOD', undoFailed: 'Falha ao desfazer: {error}', requestedFull: 'Saída completa solicitada para {path}', allUpToDate: 'Todos os arquivos já estão atualizados.' },
+    fr: { statusSyntax: 'SYNTAXE', statusWarn: 'AVERT.', statusSame: 'IDENTIQUE', statusDiff: 'DIFF', statusNew: 'NOUVEAU', statusMod: 'MODIFIÉ', undoFailed: 'Annulation impossible : {error}', requestedFull: 'Sortie complète demandée pour {path}', allUpToDate: 'Tous les fichiers sont déjà à jour.' },
+    pl: { statusSyntax: 'SKŁADNIA', statusWarn: 'UWAGA', statusSame: 'TAKI SAM', statusDiff: 'DIFF', statusNew: 'NOWY', statusMod: 'ZMIENIONY', undoFailed: 'Nie można cofnąć: {error}', requestedFull: 'Zażądano pełnej zawartości dla {path}', allUpToDate: 'Wszystkie pliki są już aktualne.' },
+    be: { statusSyntax: 'СІНТАКСІС', statusWarn: 'УВАГА', statusSame: 'БЕЗ ЗМЕН', statusDiff: 'DIFF', statusNew: 'НОВЫ', statusMod: 'ЗМЕНЕНЫ', undoFailed: 'Не ўдалося адмяніць: {error}', requestedFull: 'Запытана поўная версія {path}', allUpToDate: 'Усе файлы ўжо актуальныя.' },
+    uk: { statusSyntax: 'СИНТАКСИС', statusWarn: 'УВАГА', statusSame: 'БЕЗ ЗМІН', statusDiff: 'DIFF', statusNew: 'НОВИЙ', statusMod: 'ЗМІНЕНО', undoFailed: 'Не вдалося скасувати: {error}', requestedFull: 'Запитано повний вміст для {path}', allUpToDate: 'Усі файли вже актуальні.' },
+    zh: { statusSyntax: '语法', statusWarn: '警告', statusSame: '相同', statusDiff: '差异', statusNew: '新增', statusMod: '已修改', undoFailed: '撤销失败：{error}', requestedFull: '已请求 {path} 的完整内容', allUpToDate: '所有文件均已是最新版本。' },
+    ja: { statusSyntax: '構文', statusWarn: '警告', statusSame: '同一', statusDiff: '差分', statusNew: '新規', statusMod: '変更済み', undoFailed: '元に戻せませんでした：{error}', requestedFull: '{path} の完全な出力を要求しました', allUpToDate: 'すべてのファイルは最新です。' },
+    ru: { statusSyntax: 'СИНТАКСИС', statusWarn: 'ВНИМАНИЕ', statusSame: 'БЕЗ ИЗМЕНЕНИЙ', statusDiff: 'РАЗНИЦА', statusNew: 'НОВЫЙ', statusMod: 'ИЗМЕНЁН', undoFailed: 'Не удалось отменить: {error}', requestedFull: 'Запрошен полный вывод для {path}', allUpToDate: 'Все файлы уже актуальны.' },
+    ar: { statusSyntax: 'بنية', statusWarn: 'تحذير', statusSame: 'مطابق', statusDiff: 'فرق', statusNew: 'جديد', statusMod: 'معدّل', undoFailed: 'تعذر التراجع: {error}', requestedFull: 'تم طلب الإخراج الكامل لـ {path}', allUpToDate: 'جميع الملفات محدثة بالفعل.' },
+    hi: { statusSyntax: 'सिंटैक्स', statusWarn: 'चेतावनी', statusSame: 'समान', statusDiff: 'अंतर', statusNew: 'नया', statusMod: 'संशोधित', undoFailed: 'पूर्ववत नहीं किया जा सका: {error}', requestedFull: '{path} का पूरा आउटपुट माँगा गया', allUpToDate: 'सभी फ़ाइलें पहले से अद्यतन हैं।' },
+    ur: { statusSyntax: 'نحو', statusWarn: 'انتباہ', statusSame: 'یکساں', statusDiff: 'فرق', statusNew: 'نیا', statusMod: 'ترمیم شدہ', undoFailed: 'واپس نہیں ہو سکا: {error}', requestedFull: '{path} کے مکمل آؤٹ پٹ کی درخواست کی گئی', allUpToDate: 'تمام فائلیں پہلے ہی تازہ ترین ہیں۔' },
+    bn: { statusSyntax: 'সিনট্যাক্স', statusWarn: 'সতর্কতা', statusSame: 'একই', statusDiff: 'পার্থক্য', statusNew: 'নতুন', statusMod: 'পরিবর্তিত', undoFailed: 'পূর্বাবস্থায় ফেরানো যায়নি: {error}', requestedFull: '{path}-এর সম্পূর্ণ আউটপুট চাওয়া হয়েছে', allUpToDate: 'সব ফাইল ইতিমধ্যে সর্বশেষ অবস্থায় আছে।' },
+    id: { statusSyntax: 'SINTAKS', statusWarn: 'PERINGATAN', statusSame: 'SAMA', statusDiff: 'DIFF', statusNew: 'BARU', statusMod: 'DIUBAH', undoFailed: 'Gagal membatalkan: {error}', requestedFull: 'Output lengkap untuk {path} diminta', allUpToDate: 'Semua file sudah terbaru.' },
+    de: { statusSyntax: 'SYNTAX', statusWarn: 'WARNUNG', statusSame: 'GLEICH', statusDiff: 'DIFF', statusNew: 'NEU', statusMod: 'GEÄNDERT', undoFailed: 'Rückgängigmachen fehlgeschlagen: {error}', requestedFull: 'Vollständige Ausgabe für {path} angefordert', allUpToDate: 'Alle Dateien sind bereits aktuell.' },
+    tr: { statusSyntax: 'SÖZDİZİMİ', statusWarn: 'UYARI', statusSame: 'AYNI', statusDiff: 'FARK', statusNew: 'YENİ', statusMod: 'DEĞİŞTİ', undoFailed: 'Geri alma başarısız: {error}', requestedFull: '{path} için tam çıktı istendi', allUpToDate: 'Tüm dosyalar zaten güncel.' }
+};
+Object.keys(EXTRA_TRANSLATIONS).forEach(locale => Object.assign(I18N[locale] || (I18N[locale] = {}), EXTRA_TRANSLATIONS[locale]));
+const CORE_UI_TRANSLATIONS = {
+    fr: { connectRoot: 'Connecter la racine du projet', undo: 'Annuler', context: 'Contexte', packContext: 'Emballer le contexte du code', diffInstructions: 'Insérer les instructions de format diff', directoryTree: 'Insérer l’arborescence', attachFile: 'Joindre un fichier local', visualDiff: 'Diff visuel', editCode: 'Modifier le code', filesToSync: 'Fichiers à synchroniser', cancel: 'Annuler', skipAll: 'Tout ignorer', searchFiles: 'Rechercher des fichiers…', applyGlobs: 'Appliquer les motifs', expandAll: 'Tout développer', collapseAll: 'Tout réduire', selectAll: 'Tout sélectionner', deselectAll: 'Tout désélectionner', copyContext: 'Copier le XML du contexte', syncToDisk: 'Synchroniser sur le disque', connectFirst: 'Connectez d’abord le dossier du projet !' },
+    pl: { connectRoot: 'Połącz katalog główny projektu', undo: 'Cofnij', context: 'Kontekst', packContext: 'Spakuj kontekst kodu', diffInstructions: 'Wstaw instrukcje formatu diff', directoryTree: 'Wstaw drzewo katalogów', attachFile: 'Dołącz plik lokalny', visualDiff: 'Wizualny diff', editCode: 'Edytuj kod', filesToSync: 'Pliki do synchronizacji', cancel: 'Anuluj', skipAll: 'Pomiń wszystko', searchFiles: 'Szukaj plików…', applyGlobs: 'Zastosuj wzorce', expandAll: 'Rozwiń wszystko', collapseAll: 'Zwiń wszystko', selectAll: 'Zaznacz wszystko', deselectAll: 'Odznacz wszystko', copyContext: 'Kopiuj XML kontekstu', syncToDisk: 'Synchronizuj z dyskiem', connectFirst: 'Najpierw połącz folder projektu!' },
+    be: { connectRoot: 'Падключыць корань праекта', undo: 'Адмяніць', context: 'Кантэкст', packContext: 'Упакаваць кантэкст кода', diffInstructions: 'Уставіць інструкцыі фармату diff', directoryTree: 'Уставіць дрэва каталогаў', attachFile: 'Далучыць лакальны файл', visualDiff: 'Візуальны diff', editCode: 'Рэдагаваць код', filesToSync: 'Файлы для сінхранізацыі', cancel: 'Скасаваць', skipAll: 'Прапусціць усё', searchFiles: 'Пошук файлаў…', applyGlobs: 'Ужыць шаблоны', expandAll: 'Разгарнуць усё', collapseAll: 'Згарнуць усё', selectAll: 'Выбраць усё', deselectAll: 'Зняць выбар', copyContext: 'Скапіяваць XML кантэксту', syncToDisk: 'Сінхранізаваць з дыскам', connectFirst: 'Спачатку падключыце папку праекта!' },
+    uk: { connectRoot: 'Підключити корінь проєкту', undo: 'Скасувати', context: 'Контекст', packContext: 'Упакувати контекст коду', diffInstructions: 'Вставити інструкції формату diff', directoryTree: 'Вставити дерево каталогів', attachFile: 'Долучити локальний файл', visualDiff: 'Візуальний diff', editCode: 'Редагувати код', filesToSync: 'Файли для синхронізації', cancel: 'Скасувати', skipAll: 'Пропустити все', searchFiles: 'Пошук файлів…', applyGlobs: 'Застосувати шаблони', expandAll: 'Розгорнути все', collapseAll: 'Згорнути все', selectAll: 'Вибрати все', deselectAll: 'Зняти вибір', copyContext: 'Копіювати XML контексту', syncToDisk: 'Синхронізувати з диском', connectFirst: 'Спочатку підключіть папку проєкту!' },
+    ru: { connectRoot: 'Подключить корень проекта', undo: 'Отменить', context: 'Контекст', packContext: 'Упаковать контекст кода', diffInstructions: 'Вставить инструкции формата diff', directoryTree: 'Вставить дерево каталогов', attachFile: 'Прикрепить локальный файл', visualDiff: 'Визуальная разница', editCode: 'Редактировать код', filesToSync: 'Файлы для синхронизации', cancel: 'Отмена', skipAll: 'Пропустить всё', searchFiles: 'Поиск файлов…', applyGlobs: 'Применить шаблоны', expandAll: 'Развернуть всё', collapseAll: 'Свернуть всё', selectAll: 'Выбрать всё', deselectAll: 'Снять выбор', copyContext: 'Копировать XML контекста', syncToDisk: 'Синхронизировать с диском', connectFirst: 'Сначала подключите папку проекта!' },
+    de: { connectRoot: 'Projektstamm verbinden', undo: 'Rückgängig', context: 'Kontext', packContext: 'Code-Kontext packen', diffInstructions: 'Diff-Format-Anweisungen einfügen', directoryTree: 'Verzeichnisbaum einfügen', attachFile: 'Lokale Datei anhängen', visualDiff: 'Visueller Diff', editCode: 'Code bearbeiten', filesToSync: 'Zu synchronisierende Dateien', cancel: 'Abbrechen', skipAll: 'Alle überspringen', searchFiles: 'Dateien suchen…', applyGlobs: 'Muster anwenden', expandAll: 'Alle erweitern', collapseAll: 'Alle reduzieren', selectAll: 'Alle auswählen', deselectAll: 'Auswahl aufheben', copyContext: 'Kontext-XML kopieren', syncToDisk: 'Mit Datenträger synchronisieren', connectFirst: 'Bitte zuerst den Projektordner verbinden!' },
+    tr: { connectRoot: 'Proje kökünü bağla', undo: 'Geri al', context: 'Bağlam', packContext: 'Kod tabanı bağlamını paketle', diffInstructions: 'Diff biçimi talimatlarını ekle', directoryTree: 'Dizin ağacını ekle', attachFile: 'Yerel dosya ekle', visualDiff: 'Görsel diff', editCode: 'Kodu düzenle', filesToSync: 'Senkronize edilecek dosyalar', cancel: 'İptal', skipAll: 'Tümünü atla', searchFiles: 'Dosyalarda ara…', applyGlobs: 'Kalıpları uygula', expandAll: 'Tümünü genişlet', collapseAll: 'Tümünü daralt', selectAll: 'Tümünü seç', deselectAll: 'Seçimi kaldır', copyContext: 'Bağlam XML’ini kopyala', syncToDisk: 'Diskle senkronize et', connectFirst: 'Önce proje klasörünü bağlayın!' }
+};
+Object.assign(CORE_UI_TRANSLATIONS, {
+    zh: { connectRoot: '连接项目根目录', undo: '撤销', context: '上下文', packContext: '打包代码库上下文', diffInstructions: '插入 Diff 格式说明', directoryTree: '插入目录树', attachFile: '附加本地文件', visualDiff: '可视化 Diff', editCode: '编辑代码', filesToSync: '待同步文件', cancel: '取消', skipAll: '全部跳过', searchFiles: '搜索文件…', applyGlobs: '应用匹配规则', expandAll: '全部展开', collapseAll: '全部折叠', selectAll: '全选', deselectAll: '取消全选', copyContext: '复制上下文 XML', syncToDisk: '同步到磁盘', connectFirst: '请先连接项目文件夹！' },
+    ja: { connectRoot: 'プロジェクトルートを接続', undo: '元に戻す', context: 'コンテキスト', packContext: 'コードベースのコンテキストをパック', diffInstructions: 'Diff 形式の指示を挿入', directoryTree: 'ディレクトリツリーを挿入', attachFile: 'ローカルファイルを添付', visualDiff: 'ビジュアル Diff', editCode: 'コードを編集', filesToSync: '同期するファイル', cancel: 'キャンセル', skipAll: 'すべてスキップ', searchFiles: 'ファイルを検索…', applyGlobs: 'パターンを適用', expandAll: 'すべて展開', collapseAll: 'すべて折りたたむ', selectAll: 'すべて選択', deselectAll: '選択を解除', copyContext: 'コンテキスト XML をコピー', syncToDisk: 'ディスクに同期', connectFirst: '先にプロジェクトフォルダーを接続してください！' },
+    id: { connectRoot: 'Hubungkan root proyek', undo: 'Urungkan', context: 'Konteks', packContext: 'Kemas konteks basis kode', diffInstructions: 'Sisipkan instruksi format diff', directoryTree: 'Sisipkan pohon direktori', attachFile: 'Lampirkan file lokal', visualDiff: 'Diff visual', editCode: 'Edit kode', filesToSync: 'File untuk disinkronkan', cancel: 'Batal', skipAll: 'Lewati semua', searchFiles: 'Cari file…', applyGlobs: 'Terapkan pola', expandAll: 'Perluas semua', collapseAll: 'Ciutkan semua', selectAll: 'Pilih semua', deselectAll: 'Batalkan semua pilihan', copyContext: 'Salin XML konteks', syncToDisk: 'Sinkronkan ke disk', connectFirst: 'Hubungkan folder proyek terlebih dahulu!' },
+    ar: { connectRoot: 'توصيل جذر المشروع', undo: 'تراجع', context: 'السياق', packContext: 'حزم سياق قاعدة الشفرة', diffInstructions: 'إدراج تعليمات تنسيق diff', directoryTree: 'إدراج شجرة المجلدات', attachFile: 'إرفاق ملف محلي', visualDiff: 'Diff مرئي', editCode: 'تحرير الشفرة', filesToSync: 'الملفات المطلوب مزامنتها', cancel: 'إلغاء', skipAll: 'تخطي الكل', searchFiles: 'البحث عن ملفات…', applyGlobs: 'تطبيق الأنماط', expandAll: 'توسيع الكل', collapseAll: 'طي الكل', selectAll: 'تحديد الكل', deselectAll: 'إلغاء تحديد الكل', copyContext: 'نسخ XML السياق', syncToDisk: 'مزامنة مع القرص', connectFirst: 'يرجى توصيل مجلد المشروع أولاً!' },
+    hi: { connectRoot: 'प्रोजेक्ट रूट कनेक्ट करें', undo: 'पूर्ववत करें', context: 'कॉन्टेक्स्ट', packContext: 'कोडबेस कॉन्टेक्स्ट पैक करें', diffInstructions: 'Diff फ़ॉर्मैट निर्देश डालें', directoryTree: 'डायरेक्टरी ट्री डालें', attachFile: 'स्थानीय फ़ाइल संलग्न करें', visualDiff: 'विज़ुअल Diff', editCode: 'कोड संपादित करें', filesToSync: 'सिंक की जाने वाली फ़ाइलें', cancel: 'रद्द करें', skipAll: 'सब छोड़ें', searchFiles: 'फ़ाइलें खोजें…', applyGlobs: 'पैटर्न लागू करें', expandAll: 'सब फैलाएँ', collapseAll: 'सब समेटें', selectAll: 'सब चुनें', deselectAll: 'चयन हटाएँ', copyContext: 'कॉन्टेक्स्ट XML कॉपी करें', syncToDisk: 'डिस्क से सिंक करें', connectFirst: 'पहले प्रोजेक्ट फ़ोल्डर कनेक्ट करें!' },
+    ur: { connectRoot: 'پروجیکٹ روٹ مربوط کریں', undo: 'واپس کریں', context: 'سیاق', packContext: 'کوڈ بیس سیاق پیک کریں', diffInstructions: 'Diff فارمیٹ ہدایات داخل کریں', directoryTree: 'ڈائریکٹری ٹری داخل کریں', attachFile: 'مقامی فائل منسلک کریں', visualDiff: 'بصری Diff', editCode: 'کوڈ میں ترمیم کریں', filesToSync: 'ہم وقت ہونے والی فائلیں', cancel: 'منسوخ', skipAll: 'سب چھوڑیں', searchFiles: 'فائلیں تلاش کریں…', applyGlobs: 'پیٹرن لاگو کریں', expandAll: 'سب پھیلائیں', collapseAll: 'سب سمیٹیں', selectAll: 'سب منتخب کریں', deselectAll: 'انتخاب ختم کریں', copyContext: 'سیاق XML نقل کریں', syncToDisk: 'ڈسک سے ہم وقت کریں', connectFirst: 'پہلے پروجیکٹ فولڈر کو مربوط کریں!' },
+    bn: { connectRoot: 'প্রকল্পের রুট সংযুক্ত করুন', undo: 'পূর্বাবস্থায় ফেরান', context: 'প্রসঙ্গ', packContext: 'কোডবেসের প্রসঙ্গ প্যাক করুন', diffInstructions: 'Diff ফরম্যাটের নির্দেশনা যোগ করুন', directoryTree: 'ডিরেক্টরি ট্রি যোগ করুন', attachFile: 'স্থানীয় ফাইল সংযুক্ত করুন', visualDiff: 'ভিজ্যুয়াল Diff', editCode: 'কোড সম্পাদনা করুন', filesToSync: 'সিঙ্ক করার ফাইল', cancel: 'বাতিল', skipAll: 'সব বাদ দিন', searchFiles: 'ফাইল খুঁজুন…', applyGlobs: 'প্যাটার্ন প্রয়োগ করুন', expandAll: 'সব প্রসারিত করুন', collapseAll: 'সব গুটিয়ে নিন', selectAll: 'সব নির্বাচন করুন', deselectAll: 'নির্বাচন বাতিল করুন', copyContext: 'প্রসঙ্গ XML কপি করুন', syncToDisk: 'ডিস্কে সিঙ্ক করুন', connectFirst: 'প্রথমে প্রকল্প ফোল্ডার সংযুক্ত করুন!' }
+});
+Object.keys(CORE_UI_TRANSLATIONS).forEach(locale => Object.assign(I18N[locale], CORE_UI_TRANSLATIONS[locale]));
+Object.keys(I18N).forEach(locale => Object.keys(I18N.en).forEach(key => { if (!(key in I18N[locale])) I18N[locale][key] = I18N.en[key]; }));
+const LANGUAGE = ((typeof navigator !== 'undefined' && navigator.language) || 'en').replace('_', '-');
+const LOCALE = LOCALE_ALIASES[LANGUAGE] || LANGUAGE.split('-')[0];
+function t(key, vars = {}) {
+    if (key === 'statusDiffError') return DIFF_ERROR_LABELS[LOCALE] || DIFF_ERROR_LABELS.en;
+    const statusKey = { statusSyntax: 'syntax', statusWarn: 'warn', statusSame: 'same', statusDiff: 'diff', statusNew: 'new', statusMod: 'mod' }[key];
+    const text = statusKey
+        ? (STATUS_LABELS[LOCALE] || STATUS_LABELS.en)[statusKey]
+        : ((I18N[LOCALE] && I18N[LOCALE][key]) || I18N.en[key] || key);
+    return text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''));
+}
+
 const AI_STUDIO_SELECTORS = Object.freeze({
     promptInput: 'textarea[placeholder*="prompt" i], textarea[placeholder*="Ask" i], ms-autosize-textarea textarea, textarea.mat-mdc-input-element, textarea',
     editablePrompt: 'div[contenteditable="true"]'
@@ -107,7 +227,7 @@ diff --git a/src/example.js b/src/example.js
 
 async function insertStrictSyncFormatPrompt() {
     await insertIntoPrompt(STRICT_SYNC_FORMAT_PROMPT);
-    showToast('Appended sync format rules to prompt!', 'success');
+    showToast(t('appendedRules'), 'success');
 }
 
 // ==========================================
@@ -183,7 +303,7 @@ function updateUndoButtonState() {
     const undoBtn = document.getElementById('btn-undo-sync');
     if (undoBtn) {
         undoBtn.disabled = undoHistory.length === 0;
-        undoBtn.title = undoHistory.length > 0 ? `Undo last sync (${undoHistory.length} action(s) available)` : 'No actions to undo';
+        undoBtn.title = undoHistory.length > 0 ? `${t('undo')} (${undoHistory.length})` : t('undoNone');
     }
 }
 
@@ -203,7 +323,7 @@ async function recordUndoSnapshot(dirHandle, fileEntries) {
 
 async function performUndo(dirHandle) {
     if (undoHistory.length === 0) {
-        showToast('Nothing to undo.', 'warning');
+        showToast(t('undoNone'), 'warning');
         return;
     }
     const lastAction = undoHistory.pop();
@@ -220,9 +340,9 @@ async function performUndo(dirHandle) {
                 revertedCount++;
             }
         }
-        showToast(`↩️ Reverted ${revertedCount} file(s) to previous state.`, 'success');
+        showToast(t('reverted', { count: revertedCount }), 'success');
     } catch (err) {
-        showToast(`Failed to undo: ${err.message}`, 'error');
+        showToast(t('undoFailed', { error: err.message }), 'error');
     }
 }
 
@@ -651,14 +771,14 @@ function showBatchReviewModal(processedFiles) {
                 <div class="ai-sync-modal-dialog">
                     <div class="ai-sync-modal-header">
                         <div class="ai-sync-modal-title">
-                            <span>📦 Workspace Sync Review</span>
-                            <span style="font-size: 12px; color: #94a3b8;">(${fileStates.filter(f => f.selected).length}/${fileStates.length} selected - <kbd style="background:#334155;padding:2px 5px;border-radius:4px;">Esc</kbd> to cancel)</span>
+                            <span>📦 ${t('filesToSync')}</span>
+                            <span style="font-size: 12px; color: #94a3b8;">(${fileStates.filter(f => f.selected).length}/${fileStates.length} ${t('selected')} - <kbd style="background:#334155;padding:2px 5px;border-radius:4px;">Esc</kbd> ${t('cancel').toLowerCase()})</span>
                         </div>
                         <button id="btn-modal-close" class="ai-sync-btn ai-sync-btn-secondary" style="padding: 4px 8px;">✕</button>
                     </div>
                     <div class="ai-sync-modal-layout">
                         <div class="ai-sync-modal-sidebar">
-                            <div class="ai-sync-sidebar-header">Files to Sync</div>
+                            <div class="ai-sync-sidebar-header">${t('filesToSync')}</div>
                             ${sidebarItemsHtml}
                         </div>
 
@@ -666,35 +786,35 @@ function showBatchReviewModal(processedFiles) {
                             <div class="ai-sync-main-toolbar">
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <strong style="color: #38bdf8; font-size: 13px;">${escapeHtml(currentFile.filePath)}</strong>
-                                    ${currentFile.isDiff ? '<span class="ai-file-status-badge badge-diff">Diff Merged</span>' : ''}
-                                    ${currentFile.isExcerpt ? '<span class="ai-file-status-badge badge-warn">EXCERPT</span>' : ''}
-                                    ${currentFile.isIdentical ? '<span class="ai-file-status-badge badge-same">No Changes</span>' : ''}
+                                    ${currentFile.isDiff ? `<span class="ai-file-status-badge badge-diff">${t('diffMerged')}</span>` : ''}
+                                    ${currentFile.isExcerpt ? `<span class="ai-file-status-badge badge-warn">${t('excerpt')}</span>` : ''}
+                                    ${currentFile.isIdentical ? `<span class="ai-file-status-badge badge-same">${t('noChanges')}</span>` : ''}
                                 </div>
                                 <div class="ai-sync-view-tabs">
-                                    <button class="ai-sync-tab-btn ${currentView === 'diff' ? 'active' : ''}" id="tab-diff">🔍 Visual Diff</button>
-                                    <button class="ai-sync-tab-btn ${currentView === 'editor' ? 'active' : ''}" id="tab-editor">✏️ Edit Code</button>
+                                    <button class="ai-sync-tab-btn ${currentView === 'diff' ? 'active' : ''}" id="tab-diff">🔍 ${t('visualDiff')}</button>
+                                    <button class="ai-sync-tab-btn ${currentView === 'editor' ? 'active' : ''}" id="tab-editor">✏️ ${t('editCode')}</button>
                                 </div>
                             </div>
                             <div class="ai-sync-main-body">
                                 ${currentFile.isExcerpt ? `
                                     <div class="ai-sync-alert-box ai-sync-alert-warning">
-                                        <strong>EXCERPT DETECTED:</strong> This block appears to be partial code and is excluded from syncing by default. Request the complete file or a SEARCH/REPLACE patch before saving.
+                                        <strong>${t('excerptDetected')}</strong> ${t('excerptHelp')}
                                     </div>
                                 ` : ''}
                                 ${currentFile.hasDiffError ? `
                                     <div class="ai-sync-alert-box ai-sync-alert-danger">
-                                        <strong>Diff Error:</strong> ${escapeHtml(currentFile.diffErrorMsg)}<br>
-                                        Nothing from this patch will be written. Request a corrected diff, or use "Edit Code" to make a complete-file edit manually.
+                                        <strong>${t('diffError')}</strong> ${escapeHtml(currentFile.diffErrorMsg)}<br>
+                                        ${t('diffErrorHelp')}
                                     </div>
                                 ` : ''}
                                 ${currentFile.validation.issues.length > 0 ? `
                                     <div class="ai-sync-alert-box ai-sync-alert-danger">
-                                        <strong>Syntax Issues:</strong><br>${currentFile.validation.issues.map(i => `• ${escapeHtml(i)}`).join('<br>')}
+                                        <strong>${t('syntaxIssues')}</strong><br>${currentFile.validation.issues.map(i => `• ${escapeHtml(i)}`).join('<br>')}
                                     </div>
                                 ` : ''}
                                 ${currentFile.validation.warnings.length > 0 ? `
                                     <div class="ai-sync-alert-box ai-sync-alert-warning">
-                                        <strong>Placeholders Detected:</strong><br>${currentFile.validation.warnings.map(w => `• ${escapeHtml(w)}`).join('<br>')}
+                                        <strong>${t('placeholders')}</strong><br>${currentFile.validation.warnings.map(w => `• ${escapeHtml(w)}`).join('<br>')}
                                     </div>
                                 ` : ''}
 
@@ -707,13 +827,13 @@ function showBatchReviewModal(processedFiles) {
                         </div>
                     </div>
                     <div class="ai-sync-modal-footer">
-                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-skip-all">Skip All (Esc)</button>
+                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-skip-all">${t('skipAll')} (Esc)</button>
                         <div class="ai-sync-btn-group">
                             ${currentFile.isExcerpt ? `
-                                <button class="ai-sync-btn ai-sync-btn-warning" id="btn-request-full">🛡️ Request Full File/Diff</button>
+                                <button class="ai-sync-btn ai-sync-btn-warning" id="btn-request-full">🛡️ ${t('requestFull')}</button>
                             ` : ''}
                             <button class="ai-sync-btn ai-sync-btn-primary" id="btn-sync-selected">
-                                💾 Sync ${fileStates.filter(f => f.selected).length} Selected File(s)
+                                💾 ${t('syncSelected', { count: fileStates.filter(f => f.selected).length })}
                             </button>
                         </div>
                     </div>
@@ -734,13 +854,13 @@ function showBatchReviewModal(processedFiles) {
         }
 
         function getStatusBadgeText(file) {
-            if (file.isExcerpt) return 'EXCERPT';
-            if (file.hasDiffError) return 'DIFF ERR';
-            if (file.validation.issues.length > 0) return 'SYNTAX';
-            if (file.validation.warnings.length > 0) return 'WARN';
-            if (file.isIdentical) return 'SAME';
-            if (file.isDiff) return 'DIFF';
-            return file.originalContent === null ? 'NEW' : 'MOD';
+            if (file.isExcerpt) return t('excerpt');
+            if (file.hasDiffError) return t('statusDiffError');
+            if (file.validation.issues.length > 0) return t('statusSyntax');
+            if (file.validation.warnings.length > 0) return t('statusWarn');
+            if (file.isIdentical) return t('statusSame');
+            if (file.isDiff) return t('statusDiff');
+            return file.originalContent === null ? t('statusNew') : t('statusMod');
         }
 
         function attachEvents() {
@@ -804,7 +924,7 @@ function showBatchReviewModal(processedFiles) {
                 requestFullBtn.onclick = async () => {
                     const file = fileStates[activeIndex];
                     await insertIntoPrompt(`The response for "${file.filePath}" was marked as an excerpt. Please provide either the complete file or a precise SEARCH/REPLACE patch.\n\n${STRICT_SYNC_FORMAT_PROMPT}`);
-                    showToast(`Requested complete output for ${file.filePath}`, 'success');
+                    showToast(t('requestedFull', { path: file.filePath }), 'success');
                 };
             }
 
@@ -1260,7 +1380,7 @@ function showContextPackerModal(files, rootName) {
                 <div class="ai-sync-modal-dialog context-packer-dialog">
                     <div class="ai-sync-modal-header">
                         <div class="ai-sync-modal-title">
-                            <span>📊 Codebase Context Packer</span>
+                        <span>📊 ${t('packContext')}</span>
                             <div class="context-packer-stats-bar">
                                 <span class="context-packer-stat-badge">📄 ${selectedFiles.length}/${fileListState.length} files</span>
                                 <span class="context-packer-stat-badge">💾 ${formatBytes(totalBytes)}</span>
@@ -1271,33 +1391,33 @@ function showContextPackerModal(files, rootName) {
                     </div>
 
                     <div class="context-packer-filter-container">
-                        <input type="text" class="context-packer-input" id="packer-search" placeholder="🔍 Search files..." value="${escapeHtml(filterText)}" />
-                        <input type="text" class="context-packer-input" id="packer-custom-ignore" placeholder="Exclude globs (e.g. *.test.ts, docs/*)" />
-                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-apply-exclude" style="font-size: 11px;">Apply Globs</button>
-                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-expand-all" style="font-size: 11px;">Expand All</button>
-                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-collapse-all" style="font-size: 11px;">Collapse All</button>
+                        <input type="text" class="context-packer-input" id="packer-search" placeholder="🔍 ${t('searchFiles')}" value="${escapeHtml(filterText)}" />
+                        <input type="text" class="context-packer-input" id="packer-custom-ignore" placeholder="${t('excludeGlobs')}" />
+                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-apply-exclude" style="font-size: 11px;">${t('applyGlobs')}</button>
+                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-expand-all" style="font-size: 11px;">${t('expandAll')}</button>
+                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-collapse-all" style="font-size: 11px;">${t('collapseAll')}</button>
                         <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-toggle-all" style="font-size: 11px;">
-                            ${selectedFiles.length === fileListState.length ? 'Deselect All' : 'Select All'}
+                            ${selectedFiles.length === fileListState.length ? t('deselectAll') : t('selectAll')}
                         </button>
                     </div>
 
                     <div class="packer-tree-wrapper">
                         <div class="packer-tree-header">
-                            <div class="packer-col-name">Folder & File Structure (Sorted from Max Tokens)</div>
-                            <div class="packer-col-tokens">Tokens & Usage %</div>
-                            <div class="packer-col-size">Size</div>
+                            <div class="packer-col-name">${t('folderStructure')}</div>
+                            <div class="packer-col-tokens">${t('tokensUsage')}</div>
+                            <div class="packer-col-size">${t('size')}</div>
                         </div>
                         <div class="packer-tree-body">
-                            ${treeRowsHtml || '<div style="padding: 24px; text-align: center; color: #64748b;">No files matching filter.</div>'}
+                            ${treeRowsHtml || `<div style="padding: 24px; text-align: center; color: #64748b;">${t('noMatchingFiles')}</div>`}
                         </div>
                     </div>
 
                     <div class="ai-sync-modal-footer">
-                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-packer-cancel">Cancel (Esc)</button>
+                        <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-packer-cancel">${t('cancel')} (Esc)</button>
                         <div class="ai-sync-btn-group">
-                            <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-packer-copy">📋 Copy Context XML</button>
+                            <button class="ai-sync-btn ai-sync-btn-secondary" id="btn-packer-copy">${t('copyContext')}</button>
                             <button class="ai-sync-btn ai-sync-btn-primary" id="btn-packer-insert">
-                                📥 Insert Context (~${formatTokens(selectedTokens)}) into Prompt
+                                ${t('insertContext', { tokens: formatTokens(selectedTokens) })}
                             </button>
                         </div>
                     </div>
@@ -1401,21 +1521,21 @@ function showContextPackerModal(files, rootName) {
                         excludedCount++;
                     }
                 });
-                showToast(`Excluded ${excludedCount} file(s) matching custom pattern(s)`, 'info', 2000);
+                showToast(t('excluded', { count: excludedCount }), 'info', 2000);
                 render();
             };
 
             backdrop.querySelector('#btn-packer-copy').onclick = async () => {
                 const contextXml = formatCodebaseContext(fileListState, rootName);
                 await navigator.clipboard.writeText(contextXml);
-                showToast('📋 Codebase context copied to clipboard!', 'success');
+                showToast(t('copied'), 'success');
                 cleanupAndClose(null);
             };
 
             backdrop.querySelector('#btn-packer-insert').onclick = async () => {
                 const contextXml = formatCodebaseContext(fileListState, rootName);
                 await insertIntoPrompt(contextXml);
-                showToast(`📥 Packed codebase context (${fileListState.filter(f => f.selected).length} files) into prompt attachment!`, 'success');
+                showToast(t('packed', { count: fileListState.filter(f => f.selected).length }), 'success');
                 cleanupAndClose(null);
             };
         }
@@ -1858,7 +1978,7 @@ async function syncFileBatch(dirHandle, fileEntries) {
     }
 
     if (processedFiles.length > 0 && processedFiles.every(f => f.isIdentical)) {
-        showToast('All files are already up to date!', 'info');
+        showToast(t('allUpToDate'), 'info');
         return { writtenCount: processedFiles.length, skipped: [], alreadyIdentical: true };
     }
 
@@ -1913,19 +2033,19 @@ async function updateFileStatusBadges(turn) {
 
         if (file.isExcerpt) {
             badge.className = 'ai-file-status-badge ai-block-badge badge-warn';
-            badge.innerText = 'EXCERPT';
+            badge.innerText = t('excerpt');
         } else if (isIdentical) {
             badge.className = 'ai-file-status-badge ai-block-badge badge-same';
-            badge.innerText = 'SAME';
+            badge.innerText = t('statusSame');
         } else if (isDiff) {
             badge.className = 'ai-file-status-badge ai-block-badge badge-diff';
-            badge.innerText = 'DIFF';
+            badge.innerText = t('statusDiff');
         } else if (exists) {
             badge.className = 'ai-file-status-badge ai-block-badge badge-mod';
-            badge.innerText = 'MOD';
+            badge.innerText = t('statusMod');
         } else {
             badge.className = 'ai-file-status-badge ai-block-badge badge-new';
-            badge.innerText = 'NEW';
+            badge.innerText = t('statusNew');
         }
     }
 }
@@ -1938,40 +2058,40 @@ function injectUI() {
         if (actionsBar) {
             const syncTurnBtn = document.createElement('button');
             syncTurnBtn.className = 'btn-turn-sync';
-            syncTurnBtn.innerHTML = '⚡ Sync to Disk';
+            syncTurnBtn.innerHTML = `⚡ ${t('syncToDisk')}`;
 
             syncTurnBtn.onclick = async (e) => {
                 e.stopPropagation();
                 if (!rootDirHandle) {
-                    showToast('Connect your Project Root first (bottom right).', 'warning');
+                    showToast(t('connectFirst'), 'warning');
                     return;
                 }
 
                 const files = extractFilesFromTurn(turn);
                 if (files.length === 0) {
-                    showToast('No files with valid paths detected.', 'warning');
+                    showToast(t('noValidFiles'), 'warning');
                     return;
                 }
 
-                syncTurnBtn.innerText = `⏳ Writing ${files.length} file(s)...`;
+                syncTurnBtn.innerText = `⏳ ${t('writing', { count: files.length })}`;
                 try {
                     const result = await syncFileBatch(rootDirHandle, files);
                     if (result.alreadyIdentical) {
-                        syncTurnBtn.innerText = `✅ Up to Date`;
+                        syncTurnBtn.innerText = `✅ ${t('upToDate')}`;
                     } else if (result.writtenCount > 0) {
-                        showToast(`Successfully synced ${result.writtenCount} file(s)!`, 'success');
-                        syncTurnBtn.innerText = `✅ Synced ${result.writtenCount}/${files.length}`;
+                        showToast(t('syncSuccess', { count: result.writtenCount }), 'success');
+                        syncTurnBtn.innerText = `✅ ${t('synced', { written: result.writtenCount, total: files.length })}`;
                     } else {
-                        syncTurnBtn.innerText = `⚡ Sync to Disk`;
+                        syncTurnBtn.innerText = `⚡ ${t('syncToDisk')}`;
                     }
                     if (result.skipped && result.skipped.length > 0) {
                         handleSkippedFilesResolution(result.skipped);
-                        showToast(`${result.skipped.length} file(s) skipped and appended to prompt.`, 'info');
+                        showToast(t('skippedPrompt', { count: result.skipped.length }), 'info');
                     }
-                    setTimeout(() => { syncTurnBtn.innerText = '⚡ Sync to Disk'; }, 3000);
+                    setTimeout(() => { syncTurnBtn.innerText = `⚡ ${t('syncToDisk')}`; }, 3000);
                 } catch (err) {
-                    showToast(`Sync error: ${err.message}`, 'error');
-                    syncTurnBtn.innerText = '❌ Error';
+                    showToast(t('syncError', { error: err.message }), 'error');
+                    syncTurnBtn.innerText = `❌ ${t('error')}`;
                 }
             };
 
@@ -1985,31 +2105,31 @@ function injectUI() {
             if (actionsWrapper && !actionsWrapper.dataset.syncInjected) {
                 const singleBtn = document.createElement('button');
                 singleBtn.className = 'btn-block-sync';
-                singleBtn.title = `Sync ${file.filePath} to disk`;
-                singleBtn.innerHTML = '💾 Sync';
+                singleBtn.title = t('syncTitle', { path: file.filePath });
+                singleBtn.innerHTML = `💾 ${t('sync')}`;
 
                 singleBtn.onclick = async (e) => {
                     e.stopPropagation();
                     if (!rootDirHandle) {
-                        showToast('Please connect your folder first!', 'warning');
+                        showToast(t('connectFirst'), 'warning');
                         return;
                     }
                     try {
                         const result = await syncFileBatch(rootDirHandle, [file]);
                         if (result.alreadyIdentical) {
-                            singleBtn.innerHTML = '✅ Up to Date';
+                            singleBtn.innerHTML = `✅ ${t('upToDate')}`;
                         } else if (result.writtenCount > 0) {
-                            showToast(`Saved ${file.filePath} to disk`, 'success');
-                            singleBtn.innerHTML = '✅ Saved';
+                            showToast(t('attached', { path: file.filePath }), 'success');
+                            singleBtn.innerHTML = `✅ ${t('saved')}`;
                         } else {
-                            singleBtn.innerHTML = '⚠️ Skipped';
+                            singleBtn.innerHTML = `⚠️ ${t('skipped')}`;
                             if (result.skipped && result.skipped.length > 0) {
                                 handleSkippedFilesResolution(result.skipped);
                             }
                         }
-                        setTimeout(() => { singleBtn.innerHTML = '💾 Sync'; }, 2500);
+                        setTimeout(() => { singleBtn.innerHTML = `💾 ${t('sync')}`; }, 2500);
                     } catch (err) {
-                        showToast(`Write failed: ${err.message}`, 'error');
+                        showToast(t('writeFailed', { error: err.message }), 'error');
                     }
                 };
 
@@ -2034,10 +2154,10 @@ async function setupPersistentDirectory() {
             const permission = await stored.queryPermission({ mode: 'readwrite' });
             if (permission === 'granted') {
                 rootDirHandle = stored;
-                updateFolderStatus(`📂 ${rootDirHandle.name}`, 'Change');
-                showToast(`Restored connection to ${rootDirHandle.name}`, 'info', 2000);
+                updateFolderStatus(`📂 ${rootDirHandle.name}`, t('change'));
+                showToast(t('restored', { name: rootDirHandle.name }), 'info', 2000);
             } else {
-                updateFolderStatus(`📂 ${stored.name} (Click to re-grant)`, 'Re-grant');
+                updateFolderStatus(`📂 ${stored.name}`, t('regrant'));
             }
         }
     } catch (e) {
@@ -2057,17 +2177,18 @@ function createFloatingToolbar() {
 
     const bar = document.createElement('div');
     bar.id = 'ai-studio-sync-bar';
+    if (['ar', 'ur'].includes(LOCALE)) bar.dir = 'rtl';
     bar.innerHTML = `
-        <div class="ai-sync-drag-handle" title="Drag to reposition">⋮⋮</div>
-        <span id="sync-folder-name" style="cursor: grab;">📁 No folder connected</span>
-        <button id="btn-pick-folder">Connect Project Root</button>
-        <button id="btn-undo-sync" disabled>↩️ Undo</button>
-        <button id="btn-context-menu">📎 Context ▾</button>
+        <div class="ai-sync-drag-handle" title="${t('drag')}">⋮⋮</div>
+        <span id="sync-folder-name" style="cursor: grab;">📁 ${t('noFolder')}</span>
+        <button id="btn-pick-folder">${t('connectRoot')}</button>
+        <button id="btn-undo-sync" disabled>↩️ ${t('undo')}</button>
+        <button id="btn-context-menu">📎 ${t('context')} ▾</button>
         <div id="ai-sync-context-dropdown" class="ai-sync-dropdown-menu" style="display: none;">
-            <button class="ai-sync-dropdown-item ai-sync-dropdown-item-featured" id="btn-pack-context">📊 Pack Codebase Context</button>
-            <button class="ai-sync-dropdown-item" id="btn-insert-diff-prompt">📋 Insert Diff Format Instructions</button>
-            <button class="ai-sync-dropdown-item" id="btn-attach-tree">🌳 Insert Directory Tree</button>
-            <button class="ai-sync-dropdown-item" id="btn-attach-file">📄 Attach Local File</button>
+            <button class="ai-sync-dropdown-item ai-sync-dropdown-item-featured" id="btn-pack-context">📊 ${t('packContext')}</button>
+            <button class="ai-sync-dropdown-item" id="btn-insert-diff-prompt">📋 ${t('diffInstructions')}</button>
+            <button class="ai-sync-dropdown-item" id="btn-attach-tree">🌳 ${t('directoryTree')}</button>
+            <button class="ai-sync-dropdown-item" id="btn-attach-file">📄 ${t('attachFile')}</button>
         </div>
     `;
 
@@ -2157,16 +2278,16 @@ function createFloatingToolbar() {
                 const permission = await stored.requestPermission({ mode: 'readwrite' });
                 if (permission === 'granted') {
                     rootDirHandle = stored;
-                    updateFolderStatus(`📂 ${rootDirHandle.name}`, 'Change');
-                    showToast(`Re-connected to ${rootDirHandle.name}`, 'success');
+                    updateFolderStatus(`📂 ${rootDirHandle.name}`, t('change'));
+                    showToast(t('reconnected', { name: rootDirHandle.name }), 'success');
                     return;
                 }
             }
 
             rootDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
             await saveStoredHandle(rootDirHandle);
-            updateFolderStatus(`📂 ${rootDirHandle.name}`, 'Change');
-            showToast(`Connected to ${rootDirHandle.name}`, 'success');
+            updateFolderStatus(`📂 ${rootDirHandle.name}`, t('change'));
+            showToast(t('connected', { name: rootDirHandle.name }), 'success');
         } catch (err) {
             if (err.name !== 'AbortError') {
                 showToast(`Folder connection failed: ${err.message}`, 'error');
@@ -2192,19 +2313,19 @@ function createFloatingToolbar() {
 
     document.getElementById('btn-pack-context').onclick = async () => {
         if (!rootDirHandle) {
-            showToast('Connect your project folder first!', 'warning');
+                showToast(t('connectFirst'), 'warning');
             return;
         }
-        showToast('Scanning codebase & parsing recursive .gitignore rules...', 'info', 2000);
+        showToast(t('scanning'), 'info', 2000);
         try {
             const files = await collectAllRepositoryFiles(rootDirHandle);
             if (files.length === 0) {
-                showToast('No source files found after applying gitignore.', 'warning');
+                showToast(t('noSource'), 'warning');
                 return;
             }
             await showContextPackerModal(files, rootDirHandle.name);
         } catch (err) {
-            showToast(`Context packing failed: ${err.message}`, 'error');
+            showToast(t('packingFailed', { error: err.message }), 'error');
         }
     };
 
@@ -2212,40 +2333,40 @@ function createFloatingToolbar() {
 
     document.getElementById('btn-attach-tree').onclick = async () => {
         if (!rootDirHandle) {
-            showToast('Connect your project folder first!', 'warning');
+            showToast(t('connectFirst'), 'warning');
             return;
         }
-        showToast('Generating directory tree...', 'info', 1500);
+        showToast(t('generatingTree'), 'info', 1500);
         try {
             const files = await collectAllRepositoryFiles(rootDirHandle);
             const paths = files.map(f => f.filePath).sort();
             const tree = buildTreeFromPaths(paths);
             await insertIntoPrompt(`Project Directory Structure:\n\`\`\`\n${tree}\`\`\``);
-            showToast('Directory tree added to prompt!', 'success');
+            showToast(t('treeAdded'), 'success');
         } catch (err) {
-            showToast(`Tree generation failed: ${err.message}`, 'error');
+            showToast(t('treeFailed', { error: err.message }), 'error');
         }
     };
 
     document.getElementById('btn-attach-file').onclick = async () => {
         if (!rootDirHandle) {
-            showToast('Connect your project folder first!', 'warning');
+            showToast(t('connectFirst'), 'warning');
             return;
         }
-        const relPath = prompt('Enter relative path to attach (e.g. src/index.ts):');
+        const relPath = prompt(t('filePathPrompt'));
         if (!relPath) return;
 
         try {
             const content = await readRelativeFile(rootDirHandle, relPath.trim());
             if (content === null) {
-                showToast(`File not found: ${relPath}`, 'error');
+                showToast(t('fileNotFound', { path: relPath }), 'error');
                 return;
             }
             const ext = relPath.split('.').pop() || '';
             await insertIntoPrompt(`### File: \`${relPath}\`\n\`\`\`${ext}\n${content}\n\`\`\``);
-            showToast(`Attached ${relPath} to prompt!`, 'success');
+            showToast(t('attached', { path: relPath }), 'success');
         } catch (err) {
-            showToast(`Failed to read file: ${err.message}`, 'error');
+            showToast(t('readFailed', { error: err.message }), 'error');
         }
     };
 }
